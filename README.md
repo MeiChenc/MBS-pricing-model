@@ -44,6 +44,17 @@ The dataset consists of historical monthly performance of agency MBS. Key modeli
 These variables are chosen to capture refinancing incentives, borrower scale effects, and contractual interest rate exposure.
 
 ---
+### Baseline Hazard Estimation
+
+The Cox model estimates a non-parametric baseline hazard using the Breslow method.
+The cumulative baseline hazard captures the unconditional evolution of prepayment
+intensity over loan age.
+
+<img width="376" height="316" alt="image" src="https://github.com/user-attachments/assets/b46129f5-e11f-44a5-a33a-a924ec877949" />
+
+*Figure 1. Estimated cumulative baseline hazard as a function of loan age.*
+
+---
 
 ### 2. Survival Analysis Model
 
@@ -100,7 +111,6 @@ The asymmetric price response to interest rate shocks highlights the embedded pr
 ## Repository Structure
 
 ```text
-├── data/                         # Optional sample datasets
 ├── notebooks/
 │   └── Cox_MBS_Valuation.ipynb   # Core research notebook
 ├── src/
