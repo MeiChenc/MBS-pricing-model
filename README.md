@@ -43,7 +43,6 @@ The dataset consists of historical monthly performance of agency MBS. Key modeli
 
 These variables are chosen to capture refinancing incentives, borrower scale effects, and contractual interest rate exposure.
 
----
 ### Baseline Hazard Estimation
 
 The Cox model estimates a non-parametric baseline hazard using the Breslow method.
@@ -57,6 +56,18 @@ intensity over loan age.
 ---
 
 ### 2. Survival Analysis Model
+
+### Estimated Survival Function
+
+The fitted Cox model implies a survival function that governs the expected timing
+of principal return through prepayment.
+
+<p align="center">
+<img width="381" height="316" alt="image" src="https://github.com/user-attachments/assets/bcb67d71-0ad4-4308-a5c8-5d8497705cab" />
+</p>
+
+*Figure 2. Estimated survival probability over loan age.*
+
 
 Prepayment behavior is modeled using a semi-parametric **Cox Proportional Hazards model**:
 
@@ -83,11 +94,28 @@ The model demonstrates strong discriminatory power with a **Concordance Index (C
 
 | Feature | Coefficient | Exp(Coef) | z-score | Economic Interpretation |
 |------|------------|-----------|--------|-------------------------|
-| **Spread** | **0.70** | **2.01** | 233.66 | A unit increase in refinancing spread approximately doubles the monthly prepayment hazard, making it the primary driver of prepayment behavior. |
-| **log(UPB)** | **0.38** | **1.47** | 162.26 | Larger loan balances exhibit higher sensitivity to refinancing incentives. |
-| **Coupon** | **-0.38** | **0.68** | -148.16 | Conditional on spread, higher coupon loans display lower incremental prepayment risk. |
+| **Spread** | **0.38** | **1.47** | 47.54 | A unit increase in refinancing spread approximately doubles the monthly prepayment hazard, making it the primary driver of prepayment behavior. |
+| **log(UPB)** | **0.38** | **1.47** | 57.00 | Larger loan balances exhibit higher sensitivity to refinancing incentives. |
+| **Coupon** | **-0.54** | **0.59** | -69.69 | Conditional on spread, higher coupon loans display lower incremental prepayment risk. |
 
 All coefficients are statistically significant with p-values below 0.005.
+<img width="1070" height="113" alt="截圖 2026-01-13 晚上7 07 23" src="https://github.com/user-attachments/assets/06214412-d77f-45fe-8d99-8f0d286f6648" />
+
+### Implied Prepayment S-Curve (CPR vs Refinancing Incentive)
+
+The estimated Cox model implies a non-linear S-shaped relationship between
+refinancing incentive (WAC − market rate) and prepayment speed (CPR).
+
+<p align="center">
+  <img width="1066" height="590" alt="image" src="https://github.com/user-attachments/assets/ce9c7a2a-a6ea-4521-872f-fc336b24ecb8" />
+</p>
+
+*Figure X. Implied CPR as a function of refinancing incentive.  
+OTM regions exhibit limited prepayment activity, while CPR accelerates rapidly
+once loans become sufficiently in-the-money.*
+
+This S-curve is subsequently embedded into the cashflow engine to determine
+the timing of principal return and MBS price sensitivity to interest rate movements.
 
 ---
 
@@ -99,6 +127,20 @@ The estimated survival curve is transformed into an expected CPR term structure 
 - **Theoretical Price**: 100.00 (At Par)
 - **Effective Duration**: 4.78 years
 - **Convexity**: 32.07
+
+### Price Sensitivity and Negative Convexity
+
+The following figure illustrates MBS price sensitivity to parallel interest rate shifts,
+with prepayment behavior endogenously determined by the estimated Cox model.
+
+<p align="center">
+  <img width="989" height="590" alt="image" src="https://github.com/user-attachments/assets/a6406bf2-2914-413a-9cbc-c68033788a40" />
+</p>
+
+*Figure X. MBS price response to interest rate shocks.  
+The asymmetric price behavior highlights the embedded prepayment option and resulting
+negative convexity. The dashed line shows a linear duration-based approximation,
+which fails to capture convexity effects under larger rate moves.*
 
 **Interest Rate Sensitivity**
 - Rates −50 bps → Price = 102.43  
