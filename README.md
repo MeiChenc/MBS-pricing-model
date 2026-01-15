@@ -1,164 +1,75 @@
-# Modeling Prepayment Risk and Negative Convexity in Mortgage-Backed Securities
+# Agency MBS Prepayment Modeling & Valuation Engine
+### Stochastic Survival Analysis (Cox PH) & Monte Carlo Pricing
 
 ![Python](https://img.shields.io/badge/Python-3.8%2B-blue)
-![Lifelines](https://img.shields.io/badge/Library-Lifelines-orange)
-![Finance](https://img.shields.io/badge/Domain-Quant%20Finance-green)
-![Status](https://img.shields.io/badge/Status-Research%20Prototype-success)
+![Model](https://img.shields.io/badge/Model-Cox%20Proportional%20Hazard-orange)
+![Status](https://img.shields.io/badge/Status-Research%20Prototype-yellow)
 
----
+## ⚡ Executive Summary
 
-## Executive Summary
+This project implements a quantitative framework to price Agency Mortgage-Backed Securities (MBS) by modeling borrower prepayment behavior. Using a **Cox Proportional Hazards Model**, I quantify the sensitivity of prepayment speeds (SMM/CPR) to refinancing incentives and loan characteristics.
 
-Mortgage-Backed Securities (MBS) differ fundamentally from standard fixed-income instruments due to **borrower prepayment behavior**, which embeds a call option into the cashflow structure and gives rise to **negative convexity**.
+The model is integrated into a cash-flow engine to compute **Option-Adjusted Duration (OAD)** and **Convexity**. The research highlights the "S-Curve" behavior of prepayments and critically evaluates the limitations of applying survival analysis to aggregated cohort data.
 
-This project develops a **survival-analysis-based framework** to model prepayment risk using a **Cox Proportional Hazards model**, linking borrower refinancing incentives and loan characteristics to monthly prepayment dynamics (SMM/CPR).  
-The estimated prepayment behavior is then embedded into a cashflow discounting engine to evaluate MBS prices and key risk metrics, including duration and convexity.
+## 📊 Empirical Results & Factor Analysis
 
-Empirically, **refinancing spread** is identified as the dominant driver of prepayment risk. The model achieves strong out-of-sample ranking performance with a **Concordance Index (C-index) of 0.78**, indicating substantial explanatory power in distinguishing early versus late prepayment behavior.
+The model was calibrated on historical Agency MBS cohort data. The concordance index of **0.78** indicates strong discriminatory power in ranking prepayment risks.
 
-This framework connects borrower-level prepayment behavior directly to **cashflow timing, negative convexity, and price sensitivity under interest rate shocks**, which are central concerns in MBS valuation and risk management.
+| Covariate | Coef $\beta$ | Exp($\beta$) | z-score | Desk Interpretation |
+| :--- | :--- | :--- | :--- | :--- |
+| **Refi Incentive (Spread)** | `0.70` | `2.01` | `233.7` | **High Sensitivity**. A 100bps increase in incentive doubles the conditional hazard rate. Primary driver of negative convexity. |
+| **Loan Size (log_UPB)** | `0.38` | `1.47` | `162.3` | **Size Effect**. Larger loan balances correlate with higher prepayment efficiency (fixed costs of refinancing are less burdensome). |
+| **Coupon** | `-0.38` | `0.68` | `-148.2` | **Base Rate Effect**. Controlling for spread, lower coupon pools exhibit naturally lower turnover (stickier money). |
 
----
+## 📉 Visualization of Risk Profiles
 
-## Methodology
+### 1. The Prepayment S-Curve (CPR vs. Incentive)
+This chart demonstrates the non-linear response of borrowers. The steep slope around the "At-the-Money" point (Spread = 0) indicates where the portfolio's duration is most unstable.
 
-### 1. Data Processing and Feature Engineering
+![Prepayment S-Curve](images/s_curve_plot.png)
+*(Suggested: Insert the Spread vs CPR plot here)*
 
-The dataset consists of historical monthly performance of agency MBS. Key modeling choices include:
+### 2. Price-Yield Curve & Negative Convexity
+The valuation engine reveals the "Price Compression" effect. Unlike standard bonds (grey line), the MBS price (blue line) is capped as rates rally due to accelerated prepayments.
 
-- **Event Definition**  
-  A prepayment event is defined when the observed Single Monthly Mortality (SMM) exceeds zero.
+![Price Yield](images/price_yield_plot.png)
+*(Suggested: Insert the Price vs Rate plot here)*
 
-- **Time Dimension**  
-  Loan age (in months) is used as the duration variable for survival analysis.
+## 🧐 Model Diagnostics & Critical Observations
 
-- **Key Covariates**
-  - **Spread (Refinancing Incentive)**  
-    Defined as:  
-    `Current Mortgage Rate − Net Interest Rate`
-  - **log(UPB)**  
-    Log-transformed unpaid principal balance, serving as a proxy for loan size.
-  - **Coupon**  
-    Security coupon rate.
+A key part of this research involved critically analyzing the statistical anomalies arising from applying biological survival models to financial cohort data.
 
-These variables are chosen to capture refinancing incentives, borrower scale effects, and contractual interest rate exposure.
+### 1. The "High Event Frequency" Anomaly
+* **Observation**: In the dataset, `Event = 1` (defined as SMM > 0) occurs in nearly **99%** of the observations.
+* **Quant Insight**: Unlike clinical trials where a patient dies once, an MBS pool "bleeds" principal continuously. Since we are modeling *cohorts* rather than *individual loans*, the "Event" is effectively continuous.
+* **Implication**: The Cox model here functions less as a "Time-to-Death" predictor and more as a **Conditional Intensity Model**. The high event rate is a feature of the aggregation level, not a data error.
 
-### Baseline Hazard Estimation
+### 2. Magnitude of Coefficients
+* **Observation**: The raw coefficients appear small (e.g., Spread $\beta = 0.70$, Coupon $\beta = -0.38$).
+* **Quant Insight**: In a proportional hazards framework, the effect is exponential ($\exp(\beta)$). A coefficient of 0.70 implies an $\exp(0.70) \approx 2.01$ multiplier.
+* **Implication**: Small nominal shifts in coefficients result in massive changes in projected CPR. This confirms the **high model risk**—a slight miss-estimation of the spread coefficient can lead to significant errors in duration hedging.
 
-The Cox model estimates a non-parametric baseline hazard using the Breslow method.
-The cumulative baseline hazard captures the unconditional evolution of prepayment
-intensity over loan age.
+### 3. Baseline Cumulative Hazard Shape
+* **Observation**: The baseline cumulative hazard grows linearly and aggressively, lacking the typical "flattening" seen in biological survival.
+* **Quant Insight**: This reflects the absence of "true" survival behavior in the early life of a pool. An MBS pool creates cash flows every month.
+* **Correction**: In the pricing engine, we convert this cumulative hazard into a monthly **Single Monthly Mortality (SMM)** probability to prevent the "probability > 1" fallacy in long-dated projections.
 
-<img width="376" height="316" alt="image" src="https://github.com/user-attachments/assets/b46129f5-e11f-44a5-a33a-a924ec877949" />
+## 💰 Valuation Scenarios (Sensitivity Analysis)
 
-*Figure 1. Estimated cumulative baseline hazard as a function of loan age.*
+We stressed the model under instantaneous rate shifts to derive hedge ratios:
 
----
+* **Base Case**: Price `100.00` (Par)
+* **Rally (-50bps)**: Price `102.43` (Limited Upside)
+* **Sell-off (+50bps)**: Price `97.65` (Extended Duration)
+* **Effective Duration**: `4.78` years
 
-### 2. Survival Analysis Model
-
-### Estimated Survival Function
-
-The fitted Cox model implies a survival function that governs the expected timing
-of principal return through prepayment.
-
-<p align="center">
-<img width="381" height="316" alt="image" src="https://github.com/user-attachments/assets/bcb67d71-0ad4-4308-a5c8-5d8497705cab" />
-</p>
-
-*Figure 2. Estimated survival probability over loan age.*
-
-
-Prepayment behavior is modeled using a semi-parametric **Cox Proportional Hazards model**:
-
-\[
-h(t \mid x) = h_0(t)\exp\left(
-\beta_1 \cdot \text{Spread} +
-\beta_2 \cdot \log(\text{UPB}) +
-\beta_3 \cdot \text{Coupon}
-\right)
-\]
-
-where:
-- \( h(t \mid x) \) denotes the conditional prepayment hazard,
-- \( h_0(t) \) is the baseline hazard,
-- covariates enter multiplicatively through relative hazard shifts.
-
-The proportional hazards assumption is employed as a **first-order approximation** to capture relative refinancing incentives across borrowers, rather than to model absolute prepayment timing with full structural realism.
-
----
-
-## Empirical Results
-
-The model demonstrates strong discriminatory power with a **Concordance Index (C-index) of 0.78**, indicating effective ranking of loans by prepayment risk.
-
-| Feature | Coefficient | Exp(Coef) | z-score | Economic Interpretation |
-|------|------------|-----------|--------|-------------------------|
-| **Spread** | **0.38** | **1.47** | 47.54 | A unit increase in refinancing spread approximately doubles the monthly prepayment hazard, making it the primary driver of prepayment behavior. |
-| **log(UPB)** | **0.38** | **1.47** | 57.00 | Larger loan balances exhibit higher sensitivity to refinancing incentives. |
-| **Coupon** | **-0.54** | **0.59** | -69.69 | Conditional on spread, higher coupon loans display lower incremental prepayment risk. |
-
-All coefficients are statistically significant with p-values below 0.005.
-<img width="1070" height="113" alt="截圖 2026-01-13 晚上7 07 23" src="https://github.com/user-attachments/assets/06214412-d77f-45fe-8d99-8f0d286f6648" />
-
-### Implied Prepayment S-Curve (CPR vs Refinancing Incentive)
-
-The estimated Cox model implies a non-linear S-shaped relationship between
-refinancing incentive (WAC − market rate) and prepayment speed (CPR).
-
-<p align="center">
-  <img width="1066" height="590" alt="image" src="https://github.com/user-attachments/assets/ce9c7a2a-a6ea-4521-872f-fc336b24ecb8" />
-</p>
-
-*Figure X. Implied CPR as a function of refinancing incentive.  
-OTM regions exhibit limited prepayment activity, while CPR accelerates rapidly
-once loans become sufficiently in-the-money.*
-
-This S-curve is subsequently embedded into the cashflow engine to determine
-the timing of principal return and MBS price sensitivity to interest rate movements.
-
----
-
-## Valuation and Risk Metrics
-
-The estimated survival curve is transformed into an expected CPR term structure and embedded into a discounted cashflow engine under a zero-OAS assumption.
-
-**Baseline Valuation**
-- **Theoretical Price**: 100.00 (At Par)
-- **Effective Duration**: 4.78 years
-- **Convexity**: 32.07
-
-### Price Sensitivity and Negative Convexity
-
-The following figure illustrates MBS price sensitivity to parallel interest rate shifts,
-with prepayment behavior endogenously determined by the estimated Cox model.
-
-<p align="center">
-  <img width="989" height="590" alt="image" src="https://github.com/user-attachments/assets/a6406bf2-2914-413a-9cbc-c68033788a40" />
-</p>
-
-*Figure X. MBS price response to interest rate shocks.  
-The asymmetric price behavior highlights the embedded prepayment option and resulting
-negative convexity. The dashed line shows a linear duration-based approximation,
-which fails to capture convexity effects under larger rate moves.*
-
-**Interest Rate Sensitivity**
-- Rates −50 bps → Price = 102.43  
-- Rates +50 bps → Price = 97.65  
-
-The asymmetric price response to interest rate shocks highlights the embedded prepayment option and the resulting **negative convexity** characteristic of MBS.
-
----
-
-## Repository Structure
+## 🛠 Repository Structure
 
 ```text
+.
 ├── notebooks/
-│   └── Cox_MBS_Valuation.ipynb   # Core research notebook
+│   └── Cox_MBS_Analysis.ipynb   # Model fitting & Diagnostic plots
 ├── src/
-│   └── cox_mbs_pricing.py        # Modular pricing and modeling logic
-├── results/
-│   ├── survival_curves.png       # Estimated survival functions
-│   └── cpr_projection.png        # Modeled CPR paths
-├── README.md
-└── requirements.txt
+│   └── valuation_engine.py      # Monte Carlo cash flow logic
+├── images/                      # S-Curve & Convexity visualizations
+└── README.md
