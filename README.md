@@ -64,8 +64,8 @@ The pricing engine highlights the unique risks of MBS compared to standard bonds
 
 * **Price Compression:** The chart below illustrates **Negative Convexity**. In the rally scenario (left side), the MBS price (Blue) underperforms the theoretical standard bond (Grey) because accelerated prepayments cap the upside potential.
 
-![Price Yield Negative Convexity](<img width="854" height="630" alt="image" src="https://github.com/user-attachments/assets/95833f8c-bfd8-4987-a69b-a200da2d18c3" />
-)
+<img width="854" height="630" alt="image" src="https://github.com/user-attachments/assets/95833f8c-bfd8-4987-a69b-a200da2d18c3" />
+
 *(Figure 2: MBS Price-Yield Curve vs. Standard Bond. The divergence in the rally scenario quantifies the cost of the embedded prepayment option.)*
 * **Effective Duration:** **6.66**. This is significantly lower than a standard 30-year bond, quantifying the "Duration Shortening" effect caused by the prepayment option.
 
