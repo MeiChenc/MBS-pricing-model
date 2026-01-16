@@ -99,7 +99,7 @@ The pricing engine highlights the unique risks of MBS compared to standard bonds
 
 This project is contained within a single computational notebook:
 
-* **`Cox_MBS_pricing.ipynb`**:
+* **`MBS_pricing.ipynb`**:
     * **Part 1:** Data Loading & Monthly Aggregation.
     * **Part 2:** Logit Model Training & S-Curve Visualization.
     * **Part 3:** Pricing Engine, Cash Flow Projection, and Duration Analysis.
