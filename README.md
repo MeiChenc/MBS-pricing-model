@@ -40,13 +40,37 @@ A path-dependent **Pricing Engine** simulates cash flows over a 360-month horizo
 
 ## 3. Key Findings
 
-## 3. Key Findings
-
 ### 3.1 Model Performance (Cohort: 30yr TBA Eligible)
 The Logit model demonstrates robust explanatory power with an **R-Squared of 42.9%**.
 
 * **Primary Driver:** The **Spread** coefficient is positive and highly significant (**t-stat > 23**).
-* **S-Curve Validation:** As shown in the chart below, the model captures the non-linear response. The 30yr cohort (Blue line) exhibits a steeper slope compared to other products, indicating higher sensitivity to refinancing incentives.
+* **S-Curve Validation
+
+As shown in the figure below, the model captures the expected **non-linear S-shaped relationship**
+between refinancing incentive and prepayment rates across different MBS tenors.
+
+Key economically consistent patterns emerge:
+
+- **Strong term-structure heterogeneity:**  
+  The **15yr cohort (orange line)** exhibits the steepest slope, indicating the highest sensitivity
+  to refinancing incentives.  
+  The **20yr cohort (green line)** shows a similar but moderately less aggressive response.
+
+- **Burnout effects in longer tenors:**  
+  The **30yr cohort (blue line)** displays a noticeably flatter S-curve at higher incentive levels,
+  consistent with borrower burnout and refinancing frictions commonly observed in long-duration mortgages.
+
+- **At-the-money differentiation:**  
+  Near zero incentive, baseline CPR levels differ materially across cohorts, suggesting that loan
+  maturity and borrower composition influence prepayment behavior beyond rate incentive alone.
+
+Overall, the estimated S-curves align with well-documented MBS prepayment dynamics and support the
+model’s ability to translate refinancing incentives into economically meaningful prepayment responses.
+
+**Pricing implication:**  
+Differences in S-curve slope and saturation translate directly into **distinct duration and convexity
+profiles** across MBS tenors, particularly in rate rally environments.
+
 
 <img width="1000" height="630" alt="image" src="https://github.com/user-attachments/assets/d1e35341-daaf-435e-b107-f4a648ee9ed7" />
 *(Figure 1: Estimated Prepayment S-Curves. The non-linear shape confirms the effectiveness of the cubic spread terms in the Logit model.)*
