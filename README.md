@@ -1,75 +1,96 @@
-# Agency MBS Prepayment Modeling & Valuation Engine
-### Stochastic Survival Analysis (Cox PH) & Monte Carlo Pricing
+# MBS Prepayment Pricing & Risk Engine
 
-![Python](https://img.shields.io/badge/Python-3.8%2B-blue)
-![Model](https://img.shields.io/badge/Model-Cox%20Proportional%20Hazard-orange)
-![Status](https://img.shields.io/badge/Status-Research%20Prototype-yellow)
 
-## ⚡ Executive Summary
+## 1. Executive Summary
 
-This project implements a quantitative framework to price Agency Mortgage-Backed Securities (MBS) by modeling borrower prepayment behavior. Using a **Cox Proportional Hazards Model**, I quantify the sensitivity of prepayment speeds (SMM/CPR) to refinancing incentives and loan characteristics.
+This project develops a comprehensive **Prepayment Model** and **Pricing Engine** for Agency Mortgage-Backed Securities (MBS). The primary goal is to quantify the "S-Curve" behavior of borrowers and value the embedded prepayment option.
 
-The model is integrated into a cash-flow engine to compute **Option-Adjusted Duration (OAD)** and **Convexity**. The research highlights the "S-Curve" behavior of prepayments and critically evaluates the limitations of applying survival analysis to aggregated cohort data.
+While initial experiments explored the **Cox Proportional Hazards model**, the final implementation utilizes a **Logit-OLS framework**. This approach proved superior for handling aggregate pool-level data (CPR/SMM), successfully capturing non-linear refinancing behaviors.
 
-## 📊 Empirical Results & Factor Analysis
+The Valuation Engine reveals significant **Negative Convexity** in the analyzed 30-year cohort. The estimated **Effective Duration of 6.66** confirms "Price Compression" in rallying rate environments, validating the model's ability to price option risk.
 
-The model was calibrated on historical Agency MBS cohort data. The concordance index of **0.78** indicates strong discriminatory power in ranking prepayment risks.
+---
 
-| Covariate | Coef $\beta$ | Exp($\beta$) | z-score | Desk Interpretation |
-| :--- | :--- | :--- | :--- | :--- |
-| **Refi Incentive (Spread)** | `0.70` | `2.01` | `233.7` | **High Sensitivity**. A 100bps increase in incentive doubles the conditional hazard rate. Primary driver of negative convexity. |
-| **Loan Size (log_UPB)** | `0.38` | `1.47` | `162.3` | **Size Effect**. Larger loan balances correlate with higher prepayment efficiency (fixed costs of refinancing are less burdensome). |
-| **Coupon** | `-0.38` | `0.68` | `-148.2` | **Base Rate Effect**. Controlling for spread, lower coupon pools exhibit naturally lower turnover (stickier money). |
+## 2. Methodology
 
-## 📉 Visualization of Risk Profiles
+The entire workflow—from ETL to Pricing—is consolidated in a single Jupyter Notebook (`Cox_MBS_pricing.ipynb`) for streamlined execution.
 
-### 1. The Prepayment S-Curve (CPR vs. Incentive)
-This chart demonstrates the non-linear response of borrowers. The steep slope around the "At-the-Money" point (Spread = 0) indicates where the portfolio's duration is most unstable.
+### Step 1: Data Processing (ETL)
+* **Aggregation:** Raw daily reports are aggregated to a monthly frequency.
+* **Target Variable:** Monthly **SMM** (Single Monthly Mortality) is derived from the *last* record of `Cumulative_SMM` for each period to ensure accuracy.
+* **Features:**
+    * **Incentive (Spread):** $WAC - MarketRate$ (The primary driver).
+    * **Seasoning (Duration):** Loan Age (months).
+    * **Burnout/Size:** Logarithm of Current UPB.
 
-![Prepayment S-Curve](images/s_curve_plot.png)
-*(Suggested: Insert the Spread vs CPR plot here)*
+### Step 2: Modeling (Logit-OLS)
+We model the Conditional Prepayment Rate (CPR) using a Logistic transformation to bound predictions within $[0, 1]$:
 
-### 2. Price-Yield Curve & Negative Convexity
-The valuation engine reveals the "Price Compression" effect. Unlike standard bonds (grey line), the MBS price (blue line) is capped as rates rally due to accelerated prepayments.
+$$\ln\left(\frac{SMM}{1-SMM}\right) = \alpha + \beta_1 S + \beta_2 S^2 + \beta_3 S^3 + \beta_4 Age + \beta_5 \ln(UPB) + \epsilon$$
 
-![Price Yield](images/price_yield_plot.png)
-*(Suggested: Insert the Price vs Rate plot here)*
+* **S-Curve Logic:** Cubic terms ($S^2, S^3$) are included to capture the non-linear convexity of prepayments.
+* **Segmentation:** The code supports splitting models by security type (e.g., **30yr TBA Eligible** vs. **RPL**) to account for behavioral heterogeneity.
 
-## 🧐 Model Diagnostics & Critical Observations
+### Step 3: Valuation & Risk Analysis
+A path-dependent **Pricing Engine** simulates cash flows over a 360-month horizon:
+* **Dynamic Simulation:** Updates `Spread` and `Loan Age` iteratively.
+* **Scenario Analysis:** Shocks interest rates ($\pm 50bps$) to calculate Price Asymmetry and Effective Duration.
 
-A key part of this research involved critically analyzing the statistical anomalies arising from applying biological survival models to financial cohort data.
+---
 
-### 1. The "High Event Frequency" Anomaly
-* **Observation**: In the dataset, `Event = 1` (defined as SMM > 0) occurs in nearly **99%** of the observations.
-* **Quant Insight**: Unlike clinical trials where a patient dies once, an MBS pool "bleeds" principal continuously. Since we are modeling *cohorts* rather than *individual loans*, the "Event" is effectively continuous.
-* **Implication**: The Cox model here functions less as a "Time-to-Death" predictor and more as a **Conditional Intensity Model**. The high event rate is a feature of the aggregation level, not a data error.
+## 3. Key Findings
 
-### 2. Magnitude of Coefficients
-* **Observation**: The raw coefficients appear small (e.g., Spread $\beta = 0.70$, Coupon $\beta = -0.38$).
-* **Quant Insight**: In a proportional hazards framework, the effect is exponential ($\exp(\beta)$). A coefficient of 0.70 implies an $\exp(0.70) \approx 2.01$ multiplier.
-* **Implication**: Small nominal shifts in coefficients result in massive changes in projected CPR. This confirms the **high model risk**—a slight miss-estimation of the spread coefficient can lead to significant errors in duration hedging.
+## 3. Key Findings
 
-### 3. Baseline Cumulative Hazard Shape
-* **Observation**: The baseline cumulative hazard grows linearly and aggressively, lacking the typical "flattening" seen in biological survival.
-* **Quant Insight**: This reflects the absence of "true" survival behavior in the early life of a pool. An MBS pool creates cash flows every month.
-* **Correction**: In the pricing engine, we convert this cumulative hazard into a monthly **Single Monthly Mortality (SMM)** probability to prevent the "probability > 1" fallacy in long-dated projections.
+### 3.1 Model Performance (Cohort: 30yr TBA Eligible)
+The Logit model demonstrates robust explanatory power with an **R-Squared of 42.9%**.
 
-## 💰 Valuation Scenarios (Sensitivity Analysis)
+* **Primary Driver:** The **Spread** coefficient is positive and highly significant (**t-stat > 23**).
+* **S-Curve Validation:** As shown in the chart below, the model captures the non-linear response. The 30yr cohort (Blue line) exhibits a steeper slope compared to other products, indicating higher sensitivity to refinancing incentives.
 
-We stressed the model under instantaneous rate shifts to derive hedge ratios:
+<img width="1000" height="630" alt="image" src="https://github.com/user-attachments/assets/d1e35341-daaf-435e-b107-f4a648ee9ed7" />
+*(Figure 1: Estimated Prepayment S-Curves. The non-linear shape confirms the effectiveness of the cubic spread terms in the Logit model.)*
 
-* **Base Case**: Price `100.00` (Par)
-* **Rally (-50bps)**: Price `102.43` (Limited Upside)
-* **Sell-off (+50bps)**: Price `97.65` (Extended Duration)
-* **Effective Duration**: `4.78` years
+### 3.2 Pricing & Negative Convexity
+The pricing engine highlights the unique risks of MBS compared to standard bonds.
 
-## 🛠 Repository Structure
+**Scenario Analysis (Current Spread: +40bps)**
 
-```text
-.
-├── notebooks/
-│   └── Cox_MBS_Analysis.ipynb   # Model fitting & Diagnostic plots
-├── src/
-│   └── valuation_engine.py      # Monte Carlo cash flow logic
-├── images/                      # S-Curve & Convexity visualizations
-└── README.md
+| Scenario | Rate Shock | Price ($) | Change |
+| :--- | :--- | :--- | :--- |
+| **Rally (Rates Down)** | -50 bps | **$101.71** | +$2.85 |
+| **Base Case** | 0 bps | **$98.86** | - |
+| **Sell-off (Rates Up)** | +50 bps | **$95.12** | -$3.74 |
+
+* **Price Compression:** The chart below illustrates **Negative Convexity**. In the rally scenario (left side), the MBS price (Blue) underperforms the theoretical standard bond (Grey) because accelerated prepayments cap the upside potential.
+
+![Price Yield Negative Convexity](<img width="854" height="630" alt="image" src="https://github.com/user-attachments/assets/95833f8c-bfd8-4987-a69b-a200da2d18c3" />
+)
+*(Figure 2: MBS Price-Yield Curve vs. Standard Bond. The divergence in the rally scenario quantifies the cost of the embedded prepayment option.)*
+* **Effective Duration:** **6.66**. This is significantly lower than a standard 30-year bond, quantifying the "Duration Shortening" effect caused by the prepayment option.
+
+---
+
+## 4. Repository Structure
+
+This project is contained within a single computational notebook:
+
+* **`Cox_MBS_pricing.ipynb`**:
+    * **Part 1:** Data Loading & Monthly Aggregation.
+    * **Part 2:** Logit Model Training & S-Curve Visualization.
+    * **Part 3:** Pricing Engine, Cash Flow Projection, and Duration Analysis.
+
+---
+
+## 5. Usage
+
+To replicate the results:
+1.  Ensure the raw data file is available in the working directory.
+2.  Run all cells in `Cox_MBS_pricing.ipynb`.
+3.  The notebook will output the OLS summary statistics, the S-Curve plot, and the Price-Yield (Negative Convexity) chart.
+
+---
+
+## 6. Disclaimer
+
+This project is for academic and research purposes. The pricing models utilize simplified assumptions (e.g., static spreads, deterministic interest rate paths) and should not be used for live trading or investment decisions.
