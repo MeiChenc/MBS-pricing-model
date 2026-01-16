@@ -44,7 +44,7 @@ A path-dependent **Pricing Engine** simulates cash flows over a 360-month horizo
 The Logit model demonstrates robust explanatory power with an **R-Squared of 42.9%**.
 
 * **Primary Driver:** The **Spread** coefficient is positive and highly significant (**t-stat > 23**).
-* **S-Curve Validation
+* **S-Curve Validation:**
 
 As shown in the figure below, the model captures the expected **non-linear S-shaped relationship**
 between refinancing incentive and prepayment rates across different MBS tenors.
