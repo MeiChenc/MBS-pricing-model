@@ -13,7 +13,7 @@ The Valuation Engine reveals significant **Negative Convexity** in the analyzed 
 
 ## 2. Methodology
 
-The entire workflow—from ETL to Pricing—is consolidated in a single Jupyter Notebook (`Cox_MBS_pricing.ipynb`) for streamlined execution.
+The entire workflow—from ETL to Pricing—is consolidated in a single Jupyter Notebook (`MBS_pricing.ipynb`) for streamlined execution.
 
 ### Step 1: Data Processing (ETL)
 * **Aggregation:** Raw daily reports are aggregated to a monthly frequency.
@@ -113,7 +113,7 @@ This project is contained within a single computational notebook:
 
 To replicate the results:
 1.  Ensure the raw data file is available in the working directory.
-2.  Run all cells in `Cox_MBS_pricing.ipynb`.
+2.  Run all cells in `MBS_pricing.ipynb`.
 3.  The notebook will output the OLS summary statistics, the S-Curve plot, and the Price-Yield (Negative Convexity) chart.
 
 ---
