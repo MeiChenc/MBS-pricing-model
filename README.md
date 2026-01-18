@@ -5,9 +5,9 @@
 
 This project develops a comprehensive **Prepayment Model** and **Pricing Engine** for Agency Mortgage-Backed Securities (MBS). The primary goal is to quantify the "S-Curve" behavior of borrowers and value the embedded prepayment option.
 
-While initial experiments explored the **Cox Proportional Hazards model**, the final implementation utilizes a **Logit-OLS framework**. This approach proved superior for handling aggregate pool-level data (CPR/SMM), successfully capturing non-linear refinancing behaviors.
+While initial experiments explored a Cox Proportional Hazards framework, the final implementation adopts a Logit-OLS specification due to the use of **aggregate pool-level CPR/SMM data**, where exact event timing and censoring information required by survival models are not fully observable.
 
-The Valuation Engine reveals significant **Negative Convexity** in the analyzed 30-year cohort. The estimated **Effective Duration of 6.66** confirms "Price Compression" in rallying rate environments, validating the model's ability to price option risk.
+The Valuation Engine reveals significant **Negative Convexity** in the analyzed 30-year cohort. The estimated **Effective Duration of 6.66** confirms "Price Compression" in rallying rate environments, validating the framework’s ability to translate borrower behavior into **tradable convexity and duration risk**.
 
 ---
 
@@ -23,7 +23,7 @@ The entire workflow—from ETL to Pricing—is consolidated in a single Jupyter 
     * **Seasoning (Duration):** Loan Age (months).
     * **Burnout/Size:** Logarithm of Current UPB.
 
-### Step 2: Modeling (Logit-OLS)
+### Step 2: Prepayment Modeling (Logit-Based S-Curve Specification)
 We model the Conditional Prepayment Rate (CPR) using a Logistic transformation to bound predictions within $[0, 1]$:
 
 $$\ln\left(\frac{SMM}{1-SMM}\right) = \alpha + \beta_1 S + \beta_2 S^2 + \beta_3 S^3 + \beta_4 Age + \beta_5 \ln(UPB) + \epsilon$$
@@ -32,6 +32,8 @@ $$\ln\left(\frac{SMM}{1-SMM}\right) = \alpha + \beta_1 S + \beta_2 S^2 + \beta_3
 * **Segmentation:** The code supports splitting models by security type (e.g., **30yr TBA Eligible** vs. **RPL**) to account for behavioral heterogeneity.
 
 ### Step 3: Valuation & Risk Analysis
+The valuation framework is explicitly path-dependent, with prepayment behavior feeding back into future cash flows via loan age and outstanding balance dynamics.
+
 A path-dependent **Pricing Engine** simulates cash flows over a 360-month horizon:
 * **Dynamic Simulation:** Updates `Spread` and `Loan Age` iteratively.
 * **Scenario Analysis:** Shocks interest rates ($\pm 50bps$) to calculate Price Asymmetry and Effective Duration.
@@ -41,7 +43,8 @@ A path-dependent **Pricing Engine** simulates cash flows over a 360-month horizo
 ## 3. Key Findings
 
 ### 3.1 Model Performance (Cohort: 30yr TBA Eligible)
-The Logit model demonstrates robust explanatory power with an **R-Squared of 42.9%**.
+The reported R-squared reflects in-sample fit on the logit-transformed SMM and is used as a diagnostic rather than a structural goodness-of-fit metric.
+
 
 * **Primary Driver:** The **Spread** coefficient is positive and highly significant (**t-stat > 23**).
 * **S-Curve Validation:**
@@ -115,6 +118,16 @@ To replicate the results:
 
 ---
 
-## 6. Disclaimer
+## 6. Model Limitations & Risk Considerations
 
-This project is for academic and research purposes. The pricing models utilize simplified assumptions (e.g., static spreads, deterministic interest rate paths) and should not be used for live trading or investment decisions.
+- **Static Spread Assumption:**  
+  Interest rates are shocked deterministically rather than modeled as stochastic processes, which understates path-dependent refinancing waves.
+
+- **Reduced-Form Prepayment Specification:**  
+  The Logit S-curve captures average behavioral responses but does not explicitly model borrower credit constraints, servicer capacity, or policy interventions.
+
+- **Identification Risk:**  
+  Multiple S-curve parameterizations can fit historical CPR equally well but imply materially different duration and convexity under stress scenarios.
+
+These limitations highlight that MBS pricing accuracy depends as much on **scenario robustness** as on in-sample model fit.
+
