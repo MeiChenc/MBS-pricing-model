@@ -5,7 +5,7 @@
 
 This project develops a comprehensive **Prepayment Model** (Logit-Based) and a path-dependent **Pricing Engine** for Agency Mortgage-Backed Securities (MBS). The primary goal is to quantify the "S-Curve" behavior of borrowers and value the embedded prepayment option.
 
-While initial experiments explored a Cox Proportional Hazards framework, the final implementation adopts a Logit-OLS specification due to the use of **aggregate pool-level CPR/SMM data**, where exact event timing and censoring information required by survival models are not fully observable.
+The modeling framework adopts a Logit-based S-curve specification on monthly SMM, which is standard in empirical MBS prepayment modeling and well-suited for aggregate pool-level data.
 
 The Valuation Engine reveals significant **Negative Convexity** in the analyzed 30-year cohort. The estimated **Effective Duration of 6.66** confirms "Price Compression" in rallying rate environments, validating the framework’s ability to translate borrower behavior into **tradable convexity and duration risk**.
 
