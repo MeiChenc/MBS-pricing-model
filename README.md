@@ -75,7 +75,8 @@ Differences in S-curve slope and saturation translate directly into **distinct d
 profiles** across MBS tenors, particularly in rate rally environments.
 
 
-<img width="1000" height="630" alt="image" src="https://github.com/user-attachments/assets/d1e35341-daaf-435e-b107-f4a648ee9ed7" />
+<img width="1000" height="630" alt="image" src="https://github.com/user-attachments/assets/e5f65e8d-abc4-4172-8951-e606ee6d6666" />
+
 *(Figure 1: Estimated Prepayment S-Curves. The non-linear shape confirms the effectiveness of the cubic spread terms in the Logit model.)*
 
 ### 3.2 Pricing & Negative Convexity
