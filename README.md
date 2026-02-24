@@ -1,4 +1,4 @@
-# MBS Pricing (Notebook) — Logit-SMM + Amortization Cashflows + OAS
+# MBS Pricing — Logit-SMM + Amortization Cashflows + OAS
 
 Notebook: `MBS_Pricing.ipynb`
 
