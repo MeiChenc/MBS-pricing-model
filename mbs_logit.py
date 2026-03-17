@@ -3,56 +3,29 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import statsmodels.formula.api as smf
 
 
-EPS = 1e-6
-
+EPSILON = 1e-6
 
 MODEL_FORMULAS = {
     "A": "logit_smm ~ spread",
     "B": "logit_smm ~ spread + duration",
-    "C": "logit_smm ~ spread + I(spread**2) + I(spread**3) + log_UPB + duration",
+    # TODO: If right-tail inversion persists, replace the cubic spread terms with a spline specification.
+    "C": "logit_smm ~ spread + I(spread**2) + I(spread**3) + log_UPB_z + duration",
 }
 
 
-def to_decimal_rate(x: float) -> float:
-    x = float(x)
-    return x / 100.0 if x > 1.0 else x
-
-
-def to_pct_points(x: float) -> float:
-    x = float(x)
-    return x * 100.0 if x <= 1.0 else x
-
-
-def sigmoid(x: np.ndarray | float) -> np.ndarray | float:
-    # Numerically stable logistic transform to avoid overflow warnings.
-    x_arr = np.asarray(x, dtype=float)
-    x_arr = np.clip(x_arr, -60.0, 60.0)
-    out = 1.0 / (1.0 + np.exp(-x_arr))
-    return float(out) if np.isscalar(x) else out
-
-
-def mortgage_payment(balance: float, wac_dec: float, remaining_term_months: int) -> float:
-    r = wac_dec / 12.0
-    if remaining_term_months <= 0:
-        return balance
-    if abs(r) < 1e-12:
-        return balance / remaining_term_months
-    return balance * r / (1.0 - (1.0 + r) ** (-remaining_term_months))
-
-
-def load_and_prepare(data_path: Path) -> pd.DataFrame:
+def load_prepay_data(data_path: Path) -> pd.DataFrame:
     df = pd.read_csv(data_path, sep="|", low_memory=False)
     df.columns = (
         df.columns.str.strip().str.replace(" ", "_", regex=False).str.replace("-", "_", regex=False)
     )
 
-    num_cols = [
-        "WA_Net_Interest_Rate",
+    numeric_cols = [
         "Cohort_Current_UPB",
         "Cohort_WA_Current_Interest_Rate",
         "Cohort_WA_Current_Remaining_Months_to_Maturity",
@@ -62,7 +35,7 @@ def load_and_prepare(data_path: Path) -> pd.DataFrame:
         "CPR",
         "Cumulative_CPR",
     ]
-    for col in num_cols:
+    for col in numeric_cols:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
@@ -71,416 +44,601 @@ def load_and_prepare(data_path: Path) -> pd.DataFrame:
 
     df["date_parsed"] = pd.to_datetime(df["Date"].astype(str), format="%Y%m%d", errors="coerce")
     df["period"] = df["date_parsed"].dt.to_period("M")
-
-    # Feature engineering aligned with notebook conventions.
-    df["duration"] = pd.to_numeric(df["Cohort_WA_Current_Loan_Age"], errors="coerce")
-    df["market_rate"] = pd.to_numeric(df["WA_Net_Interest_Rate"], errors="coerce")
-    df["spread"] = pd.to_numeric(df["Cohort_WA_Current_Interest_Rate"], errors="coerce") - df["market_rate"]
-    df["spread2"] = df["spread"] ** 2
-    df["spread3"] = df["spread"] ** 3
-
-    upb = pd.to_numeric(df["Cohort_Current_UPB"], errors="coerce")
-    df["log_UPB"] = np.log(upb.clip(lower=1))
-
     return df
 
 
+def download_market_rates(df: pd.DataFrame) -> pd.DataFrame:
+    try:
+        from pandas_datareader import data as web
+    except ImportError as exc:
+        raise ImportError(
+            "pandas_datareader is required to download FRED mortgage rates. "
+            "Install dependencies from requirements.txt before running mbs_logit.py."
+        ) from exc
+
+    start_year = int(df["date_parsed"].min().year) if df["date_parsed"].notna().any() else 2010
+    end_year = int(df["date_parsed"].max().year) if df["date_parsed"].notna().any() else 2025
+
+    mr30 = web.DataReader("MORTGAGE30US", "fred", f"{start_year}-01-01", f"{end_year}-12-31").rename(
+        columns={"MORTGAGE30US": "mr30"}
+    )
+    mr15 = web.DataReader("MORTGAGE15US", "fred", f"{start_year}-01-01", f"{end_year}-12-31").rename(
+        columns={"MORTGAGE15US": "mr15"}
+    )
+
+    market_monthly = mr30.join(mr15, how="inner").resample("ME").mean()
+    market_monthly.index = market_monthly.index.to_period("M")
+    market_monthly["mr20"] = market_monthly["mr15"] + (1.0 / 3.0) * (
+        market_monthly["mr30"] - market_monthly["mr15"]
+    )
+
+    return market_monthly[["mr15", "mr20", "mr30"]]
+
+
+def assign_market_rate(row: pd.Series) -> float:
+    sec = str(row["Type_of_Security"]).lower()
+    if "15" in sec:
+        return row["mr15"]
+    if "20" in sec:
+        return row["mr20"]
+    return row["mr30"]
+
+
+def prepare_features(df: pd.DataFrame, market_monthly: pd.DataFrame) -> pd.DataFrame:
+    merged = df.merge(market_monthly, left_on="period", right_index=True, how="left")
+    merged["market_rate"] = merged.apply(assign_market_rate, axis=1)
+
+    merged["duration"] = pd.to_numeric(merged["Cohort_WA_Current_Loan_Age"], errors="coerce")
+    merged["SMM"] = pd.to_numeric(merged["SMM"], errors="coerce")
+    merged["smm_adj"] = merged["SMM"].clip(lower=EPSILON, upper=1 - EPSILON)
+    merged["logit_smm"] = np.log(merged["smm_adj"] / (1 - merged["smm_adj"]))
+
+    merged["spread"] = (
+        pd.to_numeric(merged["Cohort_WA_Current_Interest_Rate"], errors="coerce")
+        - pd.to_numeric(merged["market_rate"], errors="coerce")
+    )
+    merged["spread2"] = merged["spread"] ** 2
+    merged["spread3"] = merged["spread"] ** 3
+    merged["log_UPB"] = np.log(pd.to_numeric(merged["Cohort_Current_UPB"], errors="coerce") + 1.0)
+    merged["coupon"] = pd.to_numeric(merged["Cohort_WA_Current_Interest_Rate"], errors="coerce")
+    merged["log_UPB_z"] = (merged["log_UPB"] - merged["log_UPB"].mean()) / merged["log_UPB"].std()
+
+    merged["actual_cpr_pct"] = 100.0 * (1.0 - (1.0 - merged["SMM"]) ** 12.0)
+
+    return merged
+
+
 def build_monthly_panel(df: pd.DataFrame) -> pd.DataFrame:
-    required_cols = [
-        "period",
-        "Type_of_Security",
-        "date_parsed",
+    weight_col = "Cohort_Current_UPB"
+    work = df.dropna(subset=["period", "Type_of_Security", weight_col]).copy()
+    work[weight_col] = pd.to_numeric(work[weight_col], errors="coerce")
+    work = work[work[weight_col] > 0].copy()
+    if work.empty:
+        raise ValueError("No rows available to build the monthly weighted panel.")
+
+    weighted_avg_cols = [
         "SMM",
         "Cumulative_SMM",
-        "spread",
-        "duration",
-        "log_UPB",
+        "CPR",
+        "Cumulative_CPR",
         "market_rate",
         "Cohort_WA_Current_Interest_Rate",
-        "Cohort_Current_UPB",
+        "duration",
     ]
-    for col in required_cols:
-        if col not in df.columns:
-            raise ValueError(f"Missing required column: {col}")
 
-    work = df.dropna(subset=["period", "Type_of_Security", "date_parsed"]).copy()
-    # Keep one row per month x security (latest row in month).
+    def weighted_mean(values: pd.Series, weights: pd.Series) -> float:
+        mask = values.notna() & weights.notna()
+        if not mask.any():
+            return np.nan
+        vals = values[mask].astype(float)
+        wts = weights[mask].astype(float)
+        total_weight = wts.sum()
+        if total_weight <= 0:
+            return np.nan
+        return float(np.average(vals, weights=wts))
+
+    def aggregate_group(group: pd.DataFrame) -> pd.Series:
+        period, security_type = group.name
+        weights = pd.to_numeric(group[weight_col], errors="coerce")
+        row: dict[str, float | str | pd.Period | int] = {
+            "period": period,
+            "Type_of_Security": security_type,
+            "Date": int(group["date_parsed"].max().strftime("%Y%m%d")),
+            "Cohort_Current_UPB": float(weights.sum()),
+            "n_raw_rows": int(len(group)),
+        }
+        for col in weighted_avg_cols:
+            row[col] = weighted_mean(pd.to_numeric(group[col], errors="coerce"), weights)
+        return pd.Series(row)
+
     monthly = (
-        work.sort_values("date_parsed")
-        .groupby(["period", "Type_of_Security"], as_index=False)
-        .last()
-        .sort_values(["period", "Type_of_Security"])
+        work.groupby(["period", "Type_of_Security"])
+        .apply(aggregate_group)
         .reset_index(drop=True)
     )
 
-    if "Cumulative_SMM" in monthly.columns:
-        monthly["SMM_monthly"] = pd.to_numeric(monthly["Cumulative_SMM"], errors="coerce")
-    else:
-        monthly["SMM_monthly"] = pd.to_numeric(monthly["SMM"], errors="coerce")
-
-    monthly["smm_adj"] = monthly["SMM_monthly"].clip(lower=EPS, upper=1 - EPS)
-    monthly["logit_smm"] = np.log(monthly["smm_adj"] / (1 - monthly["smm_adj"]))
+    monthly["period"] = pd.PeriodIndex(monthly["period"], freq="M")
+    monthly["date_parsed"] = monthly["period"].dt.to_timestamp("M")
+    monthly["coupon"] = pd.to_numeric(monthly["Cohort_WA_Current_Interest_Rate"], errors="coerce")
+    monthly["spread"] = monthly["coupon"] - pd.to_numeric(monthly["market_rate"], errors="coerce")
     monthly["spread2"] = monthly["spread"] ** 2
     monthly["spread3"] = monthly["spread"] ** 3
+    monthly["log_UPB"] = np.log(pd.to_numeric(monthly["Cohort_Current_UPB"], errors="coerce") + 1.0)
+    monthly["log_UPB_z"] = (monthly["log_UPB"] - monthly["log_UPB"].mean()) / monthly["log_UPB"].std()
+    monthly["SMM_monthly"] = pd.to_numeric(monthly["SMM"], errors="coerce")
+    monthly["smm_adj"] = monthly["SMM_monthly"].clip(lower=EPSILON, upper=1 - EPSILON)
+    monthly["logit_smm"] = np.log(monthly["smm_adj"] / (1 - monthly["smm_adj"]))
+    monthly["actual_cpr_pct"] = 100.0 * (1.0 - (1.0 - monthly["SMM_monthly"]) ** 12.0)
+    monthly["reported_cpr_pct"] = pd.to_numeric(monthly["CPR"], errors="coerce")
+
     return monthly
 
 
-def time_split(df: pd.DataFrame, train_ratio: float) -> tuple[pd.DataFrame, pd.DataFrame]:
-    if df.empty:
-        raise ValueError("Target dataset is empty after filtering.")
-    n = len(df)
-    split_idx = int(np.floor(train_ratio * n))
-    split_idx = max(1, min(split_idx, n - 1))
-    train_df = df.iloc[:split_idx].copy()
-    test_df = df.iloc[split_idx:].copy()
-    if train_df["period"].max() >= test_df["period"].min():
-        raise ValueError("Time split leakage detected: train end is not earlier than test start.")
-    return train_df, test_df
+def select_top_security_types(monthly: pd.DataFrame, top_n: int = 3) -> list[str]:
+    return monthly["Type_of_Security"].value_counts().nlargest(top_n).index.tolist()
 
 
-def fit_models(train_df: pd.DataFrame) -> dict[str, object]:
-    models: dict[str, object] = {}
-    for name, formula in MODEL_FORMULAS.items():
-        models[name] = smf.ols(formula=formula, data=train_df).fit()
-    return models
+def fit_security_models(
+    monthly: pd.DataFrame, security_types: list[str]
+) -> tuple[dict[str, dict[str, object]], pd.DataFrame]:
+    fitted_models: dict[str, dict[str, object]] = {}
+    summary_rows: list[dict[str, float | int | str]] = []
+
+    needed_cols = ["logit_smm", "spread", "duration", "log_UPB_z"]
+
+    for sec_type in security_types:
+        subset = monthly[monthly["Type_of_Security"] == sec_type].copy()
+        subset = subset.dropna(subset=needed_cols)
+        if len(subset) < 50:
+            continue
+
+        fitted_models[sec_type] = {}
+        for model_name, formula in MODEL_FORMULAS.items():
+            model = smf.ols(formula=formula, data=subset).fit()
+            fitted_models[sec_type][model_name] = model
+            summary_rows.append(
+                {
+                    "Type_of_Security": sec_type,
+                    "model": model_name,
+                    "formula": formula,
+                    "nobs": int(model.nobs),
+                    "rsquared": float(model.rsquared),
+                    "adj_rsquared": float(model.rsquared_adj),
+                    "aic": float(model.aic),
+                    "bic": float(model.bic),
+                }
+            )
+
+    return fitted_models, pd.DataFrame(summary_rows)
 
 
-def evaluate_models(models: dict[str, object], test_df: pd.DataFrame) -> pd.DataFrame:
-    rows = []
-    y_true = pd.to_numeric(test_df["SMM_monthly"], errors="coerce")
-    mask = np.isfinite(y_true.values)
-    if not np.any(mask):
-        raise ValueError("No valid SMM_monthly values in test set.")
+def build_scurve_predictions(
+    monthly: pd.DataFrame,
+    fitted_models: dict[str, dict[str, object]],
+    security_types: list[str],
+    spread_grid: np.ndarray,
+) -> pd.DataFrame:
+    rows: list[dict[str, float | str]] = []
 
-    test_valid = test_df.loc[mask].copy()
-    y_true_valid = y_true.loc[mask].values.astype(float)
+    for sec_type in security_types:
+        if sec_type not in fitted_models or "C" not in fitted_models[sec_type]:
+            continue
 
-    for name, model in models.items():
-        pred_logit = model.predict(test_valid)
-        pred_smm = np.clip(sigmoid(np.asarray(pred_logit, dtype=float)), EPS, 1 - EPS)
-        rmse = float(np.sqrt(np.mean((pred_smm - y_true_valid) ** 2)))
-        mae = float(np.mean(np.abs(pred_smm - y_true_valid)))
-        rows.append(
-            {
-                "model": name,
-                "n_train": int(model.nobs),
-                "n_test": int(len(y_true_valid)),
-                "rmse_smm": rmse,
-                "mae_smm": mae,
-            }
-        )
+        subset = monthly[monthly["Type_of_Security"] == sec_type].dropna(subset=["duration", "log_UPB_z", "spread"])
+        if subset.empty:
+            continue
 
-    return pd.DataFrame(rows).sort_values(["rmse_smm", "mae_smm"], ascending=True).reset_index(drop=True)
+        model = fitted_models[sec_type]["C"]
+        for spread_value in spread_grid:
+            pred_data = subset[["duration", "log_UPB_z"]].copy()
+            pred_data["spread"] = float(spread_value)
+            pred_logit = model.predict(pred_data)
+            pred_smm = 1.0 / (1.0 + np.exp(-pred_logit))
+            pred_cpr_pct = 100.0 * (1.0 - (1.0 - pred_smm) ** 12.0)
+            rows.append(
+                {
+                    "Type_of_Security": sec_type,
+                    "spread": float(spread_value),
+                    "curve_family": "overall",
+                    "slice_name": "all",
+                    "n_obs": int(len(subset)),
+                    "pred_logit": float(np.mean(pred_logit)),
+                    "pred_smm": float(np.mean(pred_smm)),
+                    "pred_cpr_pct": float(np.mean(pred_cpr_pct)),
+                }
+            )
 
-
-def pick_improved(metrics_df: pd.DataFrame) -> str:
-    best = metrics_df.sort_values(["rmse_smm", "mae_smm"], ascending=[True, True]).iloc[0]
-    return str(best["model"])
-
-
-def simulate_vasicek_paths(
-    r0: float,
-    n_months: int,
-    n_paths: int,
-    kappa: float = 0.25,
-    theta: float | None = None,
-    sigma: float = 0.012,
-    theta_shift_bps: float = 0.0,
-    seed: int = 1,
-) -> np.ndarray:
-    dt = 1.0 / 12.0
-    theta_eff = r0 if theta is None else float(theta)
-    theta_eff = theta_eff + theta_shift_bps / 10000.0
-
-    rng = np.random.default_rng(seed)
-    z = rng.standard_normal((n_paths, n_months))
-    rates = np.zeros((n_paths, n_months), dtype=float)
-    rates[:, 0] = r0
-
-    for t in range(1, n_months):
-        rt = rates[:, t - 1]
-        drift = kappa * (theta_eff - rt) * dt
-        diffusion = sigma * np.sqrt(dt) * z[:, t]
-        rates[:, t] = np.maximum(rt + drift + diffusion, 0.0)
-
-    return rates
+    return pd.DataFrame(rows)
 
 
-def shift_paths_bps(rates: np.ndarray, bps: float) -> np.ndarray:
-    return np.maximum(rates + bps / 10000.0, 0.0)
-
-
-def _coef(params: pd.Series, *names: str) -> float:
-    for n in names:
-        if n in params.index:
-            return float(params[n])
-    return 0.0
-
-
-def predict_logit_fast(model, spread: float, duration: float, log_upb: float) -> float:
-    """
-    Fast linear predictor for formula-trained OLS models A/B/C.
-    Avoids patsy transformation overhead inside path loops.
-    """
-    p = model.params
-    intercept = _coef(p, "Intercept", "const")
-    b_spread = _coef(p, "spread")
-    b_duration = _coef(p, "duration")
-    b_log_upb = _coef(p, "log_UPB")
-    b_spread2 = _coef(p, "I(spread ** 2)", "I(spread**2)")
-    b_spread3 = _coef(p, "I(spread ** 3)", "I(spread**3)")
-
-    return (
-        intercept
-        + b_spread * spread
-        + b_duration * duration
-        + b_log_upb * log_upb
-        + b_spread2 * (spread ** 2)
-        + b_spread3 * (spread ** 3)
+def assign_duration_slices(subset: pd.DataFrame) -> pd.Series:
+    q1 = subset["duration"].quantile(1.0 / 3.0)
+    q2 = subset["duration"].quantile(2.0 / 3.0)
+    labels = np.where(
+        subset["duration"] <= q1,
+        "low_duration",
+        np.where(subset["duration"] <= q2, "median_duration", "high_duration"),
     )
+    return pd.Series(labels, index=subset.index, dtype="object")
 
 
-def price_mbs_simulation_path(
-    model,
-    initial_state: pd.Series,
-    rate_path_dec: np.ndarray,
-    oas_bps: float = 0.0,
-    term_months: int = 360,
-    face: float = 100.0,
-) -> tuple[float, np.ndarray]:
-    # Extract state variables
-    wac_dec = to_decimal_rate(initial_state["Cohort_WA_Current_Interest_Rate"])
-    wac_pct = to_pct_points(initial_state["Cohort_WA_Current_Interest_Rate"])
-    age = float(initial_state["duration"]) if np.isfinite(initial_state["duration"]) else 0.0
+def build_duration_slice_scurves(
+    monthly: pd.DataFrame,
+    fitted_models: dict[str, dict[str, object]],
+    security_types: list[str],
+    spread_grid: np.ndarray,
+) -> pd.DataFrame:
+    rows: list[dict[str, float | str]] = []
 
-    balance = float(face)
-    cashflows: list[float] = []
-    pv = 0.0
+    for sec_type in security_types:
+        model = fitted_models.get(sec_type, {}).get("C")
+        if model is None:
+            continue
 
-    oas_dec = oas_bps / 10000.0
-    discount_df = 1.0
+        subset = monthly[monthly["Type_of_Security"] == sec_type].dropna(subset=["duration", "log_UPB_z", "spread"]).copy()
+        if subset.empty:
+            continue
 
-    for t in range(1, term_months + 1):
-        r_t = float(rate_path_dec[t - 1]) + oas_dec
-        discount_df *= 1.0 / (1.0 + r_t / 12.0)
+        subset["duration_slice"] = assign_duration_slices(subset)
 
-        age += 1.0
-        mr_pct_t = to_pct_points(r_t)
-        spread = wac_pct - mr_pct_t
+        for slice_name, slice_df in subset.groupby("duration_slice"):
+            if slice_df.empty:
+                continue
+            for spread_value in spread_grid:
+                pred_data = slice_df[["duration", "log_UPB_z"]].copy()
+                pred_data["spread"] = float(spread_value)
+                pred_logit = model.predict(pred_data)
+                pred_smm = 1.0 / (1.0 + np.exp(-pred_logit))
+                pred_cpr_pct = 100.0 * (1.0 - (1.0 - pred_smm) ** 12.0)
+                rows.append(
+                    {
+                        "Type_of_Security": sec_type,
+                        "spread": float(spread_value),
+                        "curve_family": "duration_slice",
+                        "slice_name": str(slice_name),
+                        "n_obs": int(len(slice_df)),
+                        "pred_logit": float(np.mean(pred_logit)),
+                        "pred_smm": float(np.mean(pred_smm)),
+                        "pred_cpr_pct": float(np.mean(pred_cpr_pct)),
+                    }
+                )
 
-        pred_logit = predict_logit_fast(
-            model=model,
-            spread=spread,
-            duration=age,
-            log_upb=np.log(max(balance, 1.0)),
-        )
-        smm = float(np.clip(sigmoid(pred_logit), 0.0, 0.6))
-
-        remaining = term_months - t + 1
-        pmt = mortgage_payment(balance, wac_dec, remaining)
-        interest = balance * wac_dec / 12.0
-        sched_principal = max(pmt - interest, 0.0)
-        bal_after_sched = max(balance - sched_principal, 0.0)
-        prepay_principal = smm * bal_after_sched
-
-        total_principal = min(balance, sched_principal + prepay_principal)
-        cf = interest + total_principal
-
-        cashflows.append(cf)
-        pv += cf * discount_df
-
-        balance -= total_principal
-        if balance <= 1e-6:
-            break
-
-    return pv, np.asarray(cashflows, dtype=float)
+    return pd.DataFrame(rows)
 
 
-def run_paths_and_average(
-    model,
-    latest_cohort: pd.Series,
-    rates: np.ndarray,
-    term_months: int,
-) -> tuple[float, np.ndarray]:
-    prices = []
-    cf_list = []
-    for i in range(rates.shape[0]):
-        p, cf = price_mbs_simulation_path(
-            model=model,
-            initial_state=latest_cohort,
-            rate_path_dec=rates[i],
-            term_months=term_months,
-            oas_bps=0.0,
-        )
-        prices.append(p)
-        cf_list.append(cf)
-
-    max_len = max(len(cf) for cf in cf_list)
-    mat = np.zeros((len(cf_list), max_len), dtype=float)
-    for i, cf in enumerate(cf_list):
-        mat[i, : len(cf)] = cf
-
-    return float(np.mean(prices)), np.mean(mat, axis=0)
-
-
-def valuation_summary(
-    model,
-    latest_cohort: pd.Series,
-    rates_base: np.ndarray,
-    term_months: int,
-) -> dict[str, float]:
-    rates_up = shift_paths_bps(rates_base, +50)
-    rates_down = shift_paths_bps(rates_base, -50)
-
-    p_base, _ = run_paths_and_average(model, latest_cohort, rates_base, term_months)
-    p_up, _ = run_paths_and_average(model, latest_cohort, rates_up, term_months)
-    p_down, _ = run_paths_and_average(model, latest_cohort, rates_down, term_months)
-
-    dy = 50 / 10000.0
-    eff_duration = (p_down - p_up) / (2.0 * p_base * dy)
-
-    return {
-        "P_base": p_base,
-        "P_plus_50bp": p_up,
-        "P_minus_50bp": p_down,
-        "effective_duration": float(eff_duration),
-    }
-
-
-def run_pipeline(args: argparse.Namespace) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    df = load_and_prepare(Path(args.data_path))
-    monthly = build_monthly_panel(df)
-
-    target = monthly[monthly["Type_of_Security"] == args.target_type].copy()
-    target = target.sort_values("period").reset_index(drop=True)
-    needed = ["SMM_monthly", "logit_smm", "spread", "duration", "log_UPB", "market_rate", "Cohort_WA_Current_Interest_Rate"]
-    target = target.dropna(subset=needed)
-
-    if len(target) < args.min_rows:
-        raise ValueError(
-            f"Insufficient rows for split/modeling for {args.target_type}: {len(target)} "
-            f"(required >= {args.min_rows})"
-        )
-
-    train_df, test_df = time_split(target, args.train_ratio)
-    if len(train_df) < args.min_train_rows or len(test_df) < args.min_test_rows:
-        raise ValueError(
-            "Split produced too few rows: "
-            f"train={len(train_df)} (required >= {args.min_train_rows}), "
-            f"test={len(test_df)} (required >= {args.min_test_rows}). "
-            "Adjust --train-ratio or min row thresholds."
-        )
-    models = fit_models(train_df)
-    oos_metrics_df = evaluate_models(models, test_df)
-
-    baseline_name = "C"
-    improved_name = pick_improved(oos_metrics_df)
-
-    latest_cohort = target.iloc[-1]
-    r0_dec = to_decimal_rate(latest_cohort["market_rate"])
-    rates_base = simulate_vasicek_paths(
-        r0=r0_dec,
-        n_months=args.term_months,
-        n_paths=args.n_paths,
-        kappa=args.kappa,
-        sigma=args.sigma,
-        theta_shift_bps=0.0,
-        seed=args.seed,
-    )
-
-    rows = []
-    for label, model_name in [("Baseline", baseline_name), ("Improved", improved_name)]:
-        val = valuation_summary(models[model_name], latest_cohort, rates_base, args.term_months)
-        rows.append(
-            {
-                "role": label,
-                "model": model_name,
-                **val,
-            }
-        )
-
-    valuation_compare_df = pd.DataFrame(rows)
-
-    baseline = valuation_compare_df[valuation_compare_df["role"] == "Baseline"].iloc[0]
-    improved = valuation_compare_df[valuation_compare_df["role"] == "Improved"].iloc[0]
-
-    delta_df = pd.DataFrame(
+def build_historical_cpr(monthly: pd.DataFrame, security_types: list[str]) -> pd.DataFrame:
+    history = monthly[monthly["Type_of_Security"].isin(security_types)].copy()
+    history = history.sort_values(["Type_of_Security", "period"])
+    return history[
         [
-            {
-                "metric": "rmse_smm",
-                "improved_minus_baseline": float(
-                    oos_metrics_df.loc[oos_metrics_df["model"] == improved_name, "rmse_smm"].iloc[0]
-                    - oos_metrics_df.loc[oos_metrics_df["model"] == baseline_name, "rmse_smm"].iloc[0]
-                ),
-            },
-            {
-                "metric": "mae_smm",
-                "improved_minus_baseline": float(
-                    oos_metrics_df.loc[oos_metrics_df["model"] == improved_name, "mae_smm"].iloc[0]
-                    - oos_metrics_df.loc[oos_metrics_df["model"] == baseline_name, "mae_smm"].iloc[0]
-                ),
-            },
-            {
-                "metric": "P_base",
-                "improved_minus_baseline": float(improved["P_base"] - baseline["P_base"]),
-            },
-            {
-                "metric": "P_plus_50bp",
-                "improved_minus_baseline": float(improved["P_plus_50bp"] - baseline["P_plus_50bp"]),
-            },
-            {
-                "metric": "P_minus_50bp",
-                "improved_minus_baseline": float(improved["P_minus_50bp"] - baseline["P_minus_50bp"]),
-            },
-            {
-                "metric": "effective_duration",
-                "improved_minus_baseline": float(improved["effective_duration"] - baseline["effective_duration"]),
-            },
+            "period",
+            "Date",
+            "Type_of_Security",
+            "spread",
+            "SMM_monthly",
+            "Cumulative_SMM",
+            "actual_cpr_pct",
+            "reported_cpr_pct",
+            "log_UPB",
+            "log_UPB_z",
+            "coupon",
+            "duration",
+            "Cohort_Current_UPB",
+            "n_raw_rows",
         ]
+    ]
+
+
+def build_curve_comparison(
+    monthly: pd.DataFrame,
+    fitted_models: dict[str, dict[str, object]],
+    security_types: list[str],
+    n_bins: int = 12,
+) -> pd.DataFrame:
+    rows: list[dict[str, float | int | str]] = []
+
+    for sec_type in security_types:
+        model = fitted_models.get(sec_type, {}).get("C")
+        if model is None:
+            continue
+
+        subset = monthly[monthly["Type_of_Security"] == sec_type].dropna(
+            subset=["spread", "duration", "log_UPB_z", "SMM_monthly"]
+        ).copy()
+        if subset.empty:
+            continue
+
+        pred_logit = model.predict(subset[["spread", "duration", "log_UPB_z"]])
+        subset["pred_smm"] = 1.0 / (1.0 + np.exp(-pred_logit))
+        subset["pred_cpr_pct"] = 100.0 * (1.0 - (1.0 - subset["pred_smm"]) ** 12.0)
+        subset["actual_cpr_pct"] = 100.0 * (1.0 - (1.0 - subset["SMM_monthly"]) ** 12.0)
+
+        try:
+            subset["spread_bin"] = pd.qcut(subset["spread"], q=n_bins, duplicates="drop")
+        except ValueError:
+            continue
+
+        binned = (
+            subset.groupby("spread_bin", observed=False)
+            .agg(
+                spread=("spread", "mean"),
+                actual_cpr_pct=("actual_cpr_pct", "mean"),
+                pred_cpr_pct=("pred_cpr_pct", "mean"),
+                actual_cpr_std=("actual_cpr_pct", "std"),
+                pred_cpr_std=("pred_cpr_pct", "std"),
+                n_obs=("spread", "size"),
+            )
+            .dropna(subset=["spread", "actual_cpr_pct", "pred_cpr_pct"])
+            .reset_index(drop=True)
+            .sort_values("spread")
+        )
+        if binned.empty:
+            continue
+
+        binned["actual_cpr_se"] = binned["actual_cpr_std"] / np.sqrt(binned["n_obs"].clip(lower=1))
+        binned["pred_cpr_se"] = binned["pred_cpr_std"] / np.sqrt(binned["n_obs"].clip(lower=1))
+        binned["actual_cpr_ci95"] = 1.96 * binned["actual_cpr_se"].fillna(0.0)
+        binned["pred_cpr_ci95"] = 1.96 * binned["pred_cpr_se"].fillna(0.0)
+
+        for _, row in binned.iterrows():
+            rows.append(
+                {
+                    "Type_of_Security": sec_type,
+                    "spread": float(row["spread"]),
+                    "actual_cpr_pct": float(row["actual_cpr_pct"]),
+                    "pred_cpr_pct": float(row["pred_cpr_pct"]),
+                    "actual_cpr_std": float(row["actual_cpr_std"]) if pd.notna(row["actual_cpr_std"]) else np.nan,
+                    "pred_cpr_std": float(row["pred_cpr_std"]) if pd.notna(row["pred_cpr_std"]) else np.nan,
+                    "actual_cpr_se": float(row["actual_cpr_se"]) if pd.notna(row["actual_cpr_se"]) else np.nan,
+                    "pred_cpr_se": float(row["pred_cpr_se"]) if pd.notna(row["pred_cpr_se"]) else np.nan,
+                    "actual_cpr_ci95": float(row["actual_cpr_ci95"]),
+                    "pred_cpr_ci95": float(row["pred_cpr_ci95"]),
+                    "n_obs": int(row["n_obs"]),
+                }
+            )
+
+    return pd.DataFrame(rows)
+
+
+def plot_predicted_cpr_curves(scurve_df: pd.DataFrame, output_dir: Path, show_plots: bool) -> None:
+    fig, ax = plt.subplots(figsize=(12, 7))
+    overall = scurve_df[scurve_df["curve_family"] == "overall"]
+    for sec_type in overall["Type_of_Security"].drop_duplicates():
+        sec_df = overall[overall["Type_of_Security"] == sec_type]
+        ax.plot(sec_df["spread"], sec_df["pred_cpr_pct"], linewidth=2.5, label=sec_type)
+
+    ax.set_title("Empirical Theoretical CPR S-Curves by Security Type")
+    ax.set_xlabel("Incentive (WAC - Market Rate) in %")
+    ax.set_ylabel("Average Predicted CPR (%)")
+    ax.axvline(0.0, color="black", linestyle="--", alpha=0.35, label="At-The-Money")
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc="upper left")
+    fig.tight_layout()
+    fig.savefig(output_dir / "empirical_theoretical_s_curves.png", dpi=160, bbox_inches="tight")
+
+    if show_plots:
+        plt.show()
+    else:
+        plt.close(fig)
+
+
+def plot_duration_slice_scurves(scurve_df: pd.DataFrame, output_dir: Path, show_plots: bool) -> None:
+    sliced = scurve_df[scurve_df["curve_family"] == "duration_slice"]
+    sec_types = sliced["Type_of_Security"].drop_duplicates().tolist()
+    fig, axes = plt.subplots(nrows=len(sec_types), ncols=1, figsize=(12, 5 * max(len(sec_types), 1)))
+    if not isinstance(axes, np.ndarray):
+        axes = np.array([axes])
+
+    for ax, sec_type in zip(axes, sec_types):
+        sec_df = sliced[sliced["Type_of_Security"] == sec_type]
+        for slice_name in ["low_duration", "median_duration", "high_duration"]:
+            slice_df = sec_df[sec_df["slice_name"] == slice_name]
+            if slice_df.empty:
+                continue
+            ax.plot(slice_df["spread"], slice_df["pred_cpr_pct"], linewidth=2.2, label=slice_name)
+
+        ax.set_title(f"{sec_type} - Duration Slice Curves")
+        ax.set_xlabel("Incentive (WAC - Market Rate) in %")
+        ax.set_ylabel("Average Predicted CPR (%)")
+        ax.axvline(0.0, color="black", linestyle="--", alpha=0.35)
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc="upper left")
+
+    fig.suptitle("Heterogeneity-Aware Empirical Theoretical S-Curves", fontsize=16)
+    fig.tight_layout()
+    fig.savefig(output_dir / "duration_slice_empirical_theoretical_s_curves.png", dpi=160, bbox_inches="tight")
+
+    if show_plots:
+        plt.show()
+    else:
+        plt.close(fig)
+
+
+def plot_calibration_curves(curve_df: pd.DataFrame, output_dir: Path, show_plots: bool) -> None:
+    sec_types = curve_df["Type_of_Security"].drop_duplicates().tolist()
+    fig, axes = plt.subplots(nrows=len(sec_types), ncols=1, figsize=(12, 5 * max(len(sec_types), 1)))
+    if not isinstance(axes, np.ndarray):
+        axes = np.array([axes])
+
+    for ax, sec_type in zip(axes, sec_types):
+        sec_df = curve_df[curve_df["Type_of_Security"] == sec_type].sort_values("spread")
+
+        ax.errorbar(
+            sec_df["spread"],
+            sec_df["actual_cpr_pct"],
+            yerr=sec_df["actual_cpr_ci95"],
+            fmt="o",
+            color="#1f77b4",
+            ecolor="#1f77b4",
+            elinewidth=1.2,
+            capsize=3,
+            label="Actual bin mean",
+        )
+        ax.plot(
+            sec_df["spread"],
+            sec_df["pred_cpr_pct"],
+            color="#d62728",
+            linewidth=2.2,
+            marker="o",
+            label="Predicted bin mean",
+        )
+
+        for _, row in sec_df.iterrows():
+            ax.annotate(
+                f"n={int(row['n_obs'])}",
+                (row["spread"], row["actual_cpr_pct"]),
+                textcoords="offset points",
+                xytext=(0, 7),
+                ha="center",
+                fontsize=8,
+                color="#444444",
+            )
+
+        ax.set_title(sec_type)
+        ax.set_xlabel("Incentive (WAC - Market Rate) in %")
+        ax.set_ylabel("CPR (%)")
+        ax.axvline(0.0, color="black", linestyle="--", alpha=0.35)
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc="upper left")
+
+    fig.suptitle("Bin-Level CPR Calibration by Security Type", fontsize=16)
+    fig.tight_layout()
+    fig.savefig(output_dir / "bin_level_cpr_calibration.png", dpi=160, bbox_inches="tight")
+
+    if show_plots:
+        plt.show()
+    else:
+        plt.close(fig)
+
+
+def print_model_results(
+    fitted_models: dict[str, dict[str, object]],
+    summary_df: pd.DataFrame,
+    security_types: list[str],
+    history_df: pd.DataFrame,
+) -> None:
+    print("\nSelected Top Security Types for Modeling:")
+    for sec_type in security_types:
+        print(f"- {sec_type}")
+
+    print("\n=== Why the x-axis is 'Incentive (WAC - Market Rate)' ===")
+    print(
+        "WAC is the borrower coupon on the existing mortgage pool. "
+        "Market Rate is the current refinance rate proxy for the same maturity. "
+        "When WAC - Market Rate is positive, borrowers have more incentive to refinance, "
+        "so expected prepayment CPR should usually rise."
     )
 
-    out_dir = Path(args.output_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    oos_metrics_df.to_csv(out_dir / "oos_metrics_30yr_tba.csv", index=False)
-    valuation_compare_df.to_csv(out_dir / "valuation_compare_30yr_tba.csv", index=False)
-    delta_df.to_csv(out_dir / "baseline_vs_improved_delta.csv", index=False)
+    print("\n=== Model Comparison Summary ===")
+    if summary_df.empty:
+        print("No models were fitted.")
+    else:
+        print(summary_df.to_string(index=False, float_format=lambda x: f"{x:,.6f}"))
 
-    return oos_metrics_df, valuation_compare_df, delta_df
+    cumulative_cols = ["Type_of_Security", "period", "Cumulative_SMM", "SMM_monthly"]
+    cumulative_view = history_df[cumulative_cols].dropna(subset=["Cumulative_SMM", "SMM_monthly"]).copy()
+    print("\n=== Cumulative SMM Sample ===")
+    if cumulative_view.empty:
+        print("No cumulative SMM rows available.")
+    else:
+        print(cumulative_view.head(12).to_string(index=False))
+
+    print("\n=== Cumulative SMM Summary ===")
+    if cumulative_view.empty:
+        print("No cumulative SMM summary available.")
+    else:
+        cumulative_summary = (
+            cumulative_view.groupby("Type_of_Security")[["Cumulative_SMM", "SMM_monthly"]]
+            .describe()
+            .round(6)
+        )
+        print(cumulative_summary.to_string())
+
+    standard_cols = ["spread", "coupon", "log_UPB", "log_UPB_z"]
+    standard_view = history_df[["Type_of_Security", *standard_cols]].dropna().copy()
+    print("\n=== Standardized Column Summary ===")
+    if standard_view.empty:
+        print("No standardized-column rows available.")
+    else:
+        standard_summary = standard_view.groupby("Type_of_Security")[standard_cols].agg(["mean", "std", "min", "max"])
+        print(standard_summary.round(6).to_string())
+
+    for sec_type in security_types:
+        if sec_type not in fitted_models:
+            continue
+        for model_name in ["A", "B", "C"]:
+            if model_name not in fitted_models[sec_type]:
+                continue
+            print(f"\n=== OLS Regression Results: {sec_type} | Model {model_name} ===")
+            print(fitted_models[sec_type][model_name].summary())
+
+
+def save_outputs(
+    output_dir: Path,
+    monthly: pd.DataFrame,
+    history_df: pd.DataFrame,
+    summary_df: pd.DataFrame,
+    scurve_df: pd.DataFrame,
+    curve_compare_df: pd.DataFrame,
+) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    monthly.to_csv(output_dir / "monthly_modeling_panel.csv", index=False)
+    history_df.to_csv(output_dir / "historical_cpr_top3.csv", index=False)
+    summary_df.to_csv(output_dir / "ols_model_comparison.csv", index=False)
+    scurve_df.to_csv(output_dir / "empirical_theoretical_scurve_grid.csv", index=False)
+    curve_compare_df.to_csv(output_dir / "actual_vs_predicted_cpr_curve_bins.csv", index=False)
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Restore OLS-logit + Vasicek + path-dependent MBS pricing workflow with baseline/improved comparison."
+        description="Notebook-aligned OLS/logit MBS prepayment modeling with top-3 security types."
     )
     parser.add_argument("--data-path", type=str, default="PrepayData.txt")
-    parser.add_argument("--target-type", type=str, default="30yr TBA Eligible")
-    parser.add_argument("--train-ratio", type=float, default=0.8)
-    parser.add_argument("--n-paths", type=int, default=300)
-    parser.add_argument("--term-months", type=int, default=360)
-    parser.add_argument("--seed", type=int, default=1)
-    parser.add_argument("--kappa", type=float, default=0.25)
-    parser.add_argument("--sigma", type=float, default=0.012)
-    parser.add_argument("--min-rows", type=int, default=40)
-    parser.add_argument("--min-train-rows", type=int, default=30)
-    parser.add_argument("--min-test-rows", type=int, default=8)
-    parser.add_argument("--output-dir", type=str, default="outputs")
+    parser.add_argument("--output-dir", type=str, default="outputs/logit_model")
+    parser.add_argument("--show-plots", action="store_true", default=True)
+    parser.add_argument("--no-show-plots", action="store_false", dest="show_plots")
     return parser
 
 
 def main() -> None:
-    parser = build_arg_parser()
-    args = parser.parse_args()
+    args = build_arg_parser().parse_args()
+    data_path = Path(args.data_path)
+    output_dir = Path(args.output_dir)
 
-    oos_metrics_df, valuation_compare_df, delta_df = run_pipeline(args)
+    df = load_prepay_data(data_path)
+    market_monthly = download_market_rates(df)
+    featured = prepare_features(df, market_monthly)
+    monthly = build_monthly_panel(featured)
+    security_types = select_top_security_types(monthly, top_n=3)
+    fitted_models, summary_df = fit_security_models(monthly, security_types)
+    scurve_df = build_scurve_predictions(
+        monthly=monthly,
+        fitted_models=fitted_models,
+        security_types=security_types,
+        spread_grid=np.linspace(-2.0, 3.0, 100),
+    )
+    duration_slice_scurve_df = build_duration_slice_scurves(
+        monthly=monthly,
+        fitted_models=fitted_models,
+        security_types=security_types,
+        spread_grid=np.linspace(-2.0, 3.0, 100),
+    )
+    scurve_df = pd.concat([scurve_df, duration_slice_scurve_df], ignore_index=True)
+    history_df = build_historical_cpr(monthly, security_types)
+    curve_compare_df = build_curve_comparison(monthly, fitted_models, security_types)
 
-    print("\n=== Out-of-Sample Metrics (30yr TBA Eligible) ===")
-    print(oos_metrics_df.to_string(index=False, float_format=lambda x: f"{x:,.6f}"))
-
-    print("\n=== Baseline vs Improved Valuation Impact ===")
-    print(valuation_compare_df.to_string(index=False, float_format=lambda x: f"{x:,.6f}"))
-
-    print("\n=== Improved - Baseline Delta ===")
-    print(delta_df.to_string(index=False, float_format=lambda x: f"{x:,.6f}"))
+    save_outputs(
+        output_dir=output_dir,
+        monthly=monthly,
+        history_df=history_df,
+        summary_df=summary_df,
+        scurve_df=scurve_df,
+        curve_compare_df=curve_compare_df,
+    )
+    print_model_results(fitted_models, summary_df, security_types, history_df)
+    plot_predicted_cpr_curves(scurve_df, output_dir, args.show_plots)
+    plot_duration_slice_scurves(scurve_df, output_dir, args.show_plots)
+    plot_calibration_curves(curve_compare_df, output_dir, args.show_plots)
 
 
 if __name__ == "__main__":

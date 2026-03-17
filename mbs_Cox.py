@@ -1,11 +1,9 @@
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-try:
-    import matplotlib.pyplot as plt
-except ModuleNotFoundError:
-    plt = None
+from lifelines import CoxPHFitter
 
 
 def load_and_prepare(data_path: Path) -> pd.DataFrame:
@@ -49,12 +47,12 @@ def load_and_prepare(data_path: Path) -> pd.DataFrame:
     df["spread"] = pd.to_numeric(df["Cohort_WA_Current_Interest_Rate"], errors="coerce") - df["market_rate"]
     df["spread2"] = df["spread"] ** 2
     df["spread3"] = df["spread"] ** 3
-    # Freddie Mac Attribute 4: Cohort Current UPB -> log_UPB = ln(UPB), clipped for numerical stability.
-    upb = pd.to_numeric(df["Cohort_Current_UPB"], errors="coerce")
-    df["log_UPB"] = np.log(upb.clip(lower=1))
+    df["log_UPB"] = np.log(pd.to_numeric(df["Cohort_Current_UPB"], errors="coerce") + 1)
     df["coupon"] = pd.to_numeric(df["Cohort_WA_Current_Interest_Rate"], errors="coerce")
 
-    model_cols = ["Loan age", "spread", "spread2", "spread3", "log_UPB", "coupon", "logit_smm_target", "smm_adj"]
+    df["event"] = (df["SMM"].fillna(0) > 0).astype(int)
+
+    model_cols = ["Loan age", "event", "spread", "spread2", "spread3", "log_UPB", "coupon", "logit_smm_target"]
     df = df.dropna(subset=model_cols).copy()
 
     return df
@@ -65,47 +63,18 @@ def fit_cox(df: pd.DataFrame):
 
     mu = df[feature_cols].mean()
     sigma = df[feature_cols].std().replace(0, 1.0)
+
     z = (df[feature_cols] - mu) / sigma
 
-    # Cohort-level "Cox-like" intensity fit:
-    # log(SMM_t) = alpha(age_t) + z_t * beta + eps_t, weighted by UPB.
-    age = pd.to_numeric(df["Loan age"], errors="coerce").round().astype(int)
-    age = age.clip(lower=1)
-    y = np.log(np.clip(pd.to_numeric(df["smm_adj"], errors="coerce").values.astype(float), 1e-6, 1 - 1e-6))
-    X = z.values.astype(float)
-    w = pd.to_numeric(df["Cohort_Current_UPB"], errors="coerce").values.astype(float)
-    w = np.where(np.isfinite(w) & (w > 0), w, np.nan)
-    if np.all(np.isnan(w)):
-        w = np.ones(len(df), dtype=float)
-    else:
-        median_w = float(np.nanmedian(w))
-        if not np.isfinite(median_w) or median_w <= 0:
-            median_w = 1.0
-        w = np.where(np.isnan(w), 1.0, w / median_w)
-        w = np.clip(w, 1e-6, 1e6)
+    model_df = pd.concat([df[["Loan age", "event"]], z], axis=1)
 
-    beta = np.zeros(X.shape[1], dtype=float)
-    for _ in range(8):
-        resid = y - X @ beta
-        age_df = pd.DataFrame({"age": age.values, "resid": resid, "w": w})
-        alpha_by_age = age_df.groupby("age").apply(lambda g: np.average(g["resid"], weights=g["w"]))
-        alpha_vec = age.map(alpha_by_age).values.astype(float)
-        y_tilde = y - alpha_vec
-        sqrt_w = np.sqrt(w)
-        beta, _, _, _ = np.linalg.lstsq(X * sqrt_w[:, None], y_tilde * sqrt_w, rcond=None)
+    cph = CoxPHFitter()
+    cph.fit(model_df, duration_col="Loan age", event_col="event")
 
-    resid = y - X @ beta
-    age_df = pd.DataFrame({"age": age.values, "resid": resid, "w": w})
-    alpha_by_age = age_df.groupby("age").apply(lambda g: np.average(g["resid"], weights=g["w"]))
-    max_age = int(age.max())
-    alpha_full = alpha_by_age.reindex(range(1, max_age + 1)).ffill().bfill().fillna(0.0).values
-    lambda0 = np.clip(np.exp(alpha_full), 1e-8, 0.95)
-    h0 = np.cumsum(lambda0)
+    beta = cph.params_.loc[feature_cols].values
+    h0 = cph.baseline_cumulative_hazard_.values.flatten()
 
-    y_hat = age.map(alpha_by_age).values.astype(float) + X @ beta
-    mse_w = float(np.average((y - y_hat) ** 2, weights=w))
-    model_diag = {"weighted_rmse_log_smm": float(np.sqrt(mse_w))}
-    return model_diag, mu, sigma, beta, h0
+    return cph, mu, sigma, beta, h0
 
 
 def risk_multiplier(x_raw: pd.Series, mu: pd.Series, sigma: pd.Series, beta: np.ndarray) -> float:
@@ -718,10 +687,63 @@ def plot_scenario_sensitivity_matrix(out: pd.DataFrame, out_dir: Path):
 def main():
     data_path = Path(__file__).resolve().parent / "PrepayData.txt"
     df = load_and_prepare(data_path)
+    df_monthly_top3 = build_top3_security_monthly_smm(df)
+
+    cph, mu, sigma, beta, h0 = fit_cox(df)
+
+    x0 = df[["spread", "spread2", "spread3", "log_UPB", "coupon"]].mean()
+
+    # Baseline pricing setup
+    y0_annual = 0.045
+    coupon_annual = 0.05
+    term_months = int(np.clip(df["Cohort_WA_Current_Remaining_Months_to_Maturity"].median(), 60, 360))
+
+    # Simple mapping from rate shock to prepay incentive proxy (spread)
+    spread_beta_to_rate = -1.0
+
+    scenarios = []
+    for shock_bp in [-100, -50, -25, 0, 25, 50, 100]:
+        scenarios.append(
+            run_attribution(
+                h0=h0,
+                x0=x0,
+                mu=mu,
+                sigma=sigma,
+                beta=beta,
+                y0_annual=y0_annual,
+                rate_shock_bp=shock_bp,
+                spread_beta_to_rate=spread_beta_to_rate,
+                coupon_annual=coupon_annual,
+                term_months=term_months,
+            )
+        )
+
+    out = pd.DataFrame(scenarios)
     logit_coef_df, logit_pred_df = fit_logit_smm_by_security_type(df, min_obs=1000)
+    scurve_df = build_scurve_grid_predictions(logit_coef_df)
     out_dir = Path(__file__).resolve().parent
-    print("\nWLS model build summary")
+    fig_dir = out_dir / "outputs"
+    fig_dir.mkdir(parents=True, exist_ok=True)
+
+    print("\nModel fit summary")
     print(f"Observations: {len(df)}")
+    print(f"Concordance Index: {cph.concordance_index_:.3f}")
+    print(f"Median remaining term used for CF engine: {term_months} months")
+    print(f"Baseline discount rate: {y0_annual:.2%}")
+    print(f"Baseline pass-through coupon: {coupon_annual:.2%}")
+    print(f"Spread-to-rate shock beta: {spread_beta_to_rate:+.2f}")
+
+    print("\nRate vs Prepay Attribution")
+    print(out.to_string(index=False, float_format=lambda x: f"{x:,.6f}"))
+    print("\nTop 3 security types monthly SMM")
+    if df_monthly_top3.empty:
+        print("No monthly rows available for top-3 Type_of_Security SMM output.")
+    else:
+        print(
+            df_monthly_top3[
+                ["Type_of_Security", "period", "Date", "SMM_monthly"]
+            ].to_string(index=False)
+        )
 
     if not logit_coef_df.empty:
         print("\nPer-Security WLS Logit (target=ln(SMM/(1-SMM)), features=spread/spread2/spread3/Loan age/log_UPB)")
@@ -766,11 +788,63 @@ def main():
                 "cpr_hat_pct",
             ]
         ].to_csv(out_dir / "security_type_logit_smm_predictions.csv", index=False)
-        print("\nWLS outputs written:")
-        print(f"- {out_dir / 'security_type_logit_smm_coefficients.csv'}")
-        print(f"- {out_dir / 'security_type_logit_smm_predictions.csv'}")
-    else:
-        print("\nNo valid rows for WLS fitting after preprocessing.")
+
+    if not scurve_df.empty:
+        scurve_df.to_csv(out_dir / "security_type_scurve_grid_predictions.csv", index=False)
+        save_scurve_plots(scurve_df, out_dir=fig_dir)
+        print("\nS-curve outputs written:")
+        print(f"- {out_dir / 'security_type_scurve_grid_predictions.csv'}")
+        print(f"- {fig_dir} (per-security CPR-vs-spread PNGs)")
+
+    # Visual outputs requested in assignment
+    plot_quality_of_fit(logit_pred_df, out_dir=fig_dir)
+    plot_hazard_survival(h0_cum=h0, x0=x0, mu=mu, sigma=sigma, beta=beta, out_dir=fig_dir)
+    plot_price_yield_negative_convexity(
+        h0=h0,
+        x0=x0,
+        mu=mu,
+        sigma=sigma,
+        beta=beta,
+        base_yield=y0_annual,
+        spread_beta_to_rate=spread_beta_to_rate,
+        coupon_annual=coupon_annual,
+        term_months=term_months,
+        out_dir=fig_dir,
+    )
+    plot_cashflow_breakdown(
+        h0=h0,
+        x0=x0,
+        mu=mu,
+        sigma=sigma,
+        beta=beta,
+        coupon_annual=coupon_annual,
+        term_months=term_months,
+        out_dir=fig_dir,
+    )
+    plot_scenario_sensitivity_matrix(out, out_dir=fig_dir)
+    print("\nAdditional visual outputs written to:")
+    print(f"- {fig_dir}")
+
+    discount_metrics = central_diff_metrics(out, price_col="P_discount_only", shift_bp=50)
+    joint_metrics = central_diff_metrics(out, price_col="P_joint", shift_bp=50)
+
+    if discount_metrics is not None:
+        p0_d, p_rate_down_d, p_rate_up_d, duration_d, convexity_d = discount_metrics
+        print("\nDiscount-only sensitivity (central difference, +/-50bp around 0bp)")
+        print(f"p0          (y +   0bp): {p0_d:.6f}")
+        print(f"p_rate_down (y -  50bp): {p_rate_down_d:.6f}")
+        print(f"p_rate_up   (y +  50bp): {p_rate_up_d:.6f}")
+        print(f"duration_discount_only: {duration_d:.6f}")
+        print(f"convexity_discount_only: {convexity_d:.6f}")
+
+    if joint_metrics is not None:
+        p0_j, p_rate_down_j, p_rate_up_j, duration_j, convexity_j = joint_metrics
+        print("\nFull MBS sensitivity (joint rate+prepay, central difference, +/-50bp around 0bp)")
+        print(f"p0          (y +   0bp): {p0_j:.6f}")
+        print(f"p_rate_down (y -  50bp): {p_rate_down_j:.6f}")
+        print(f"p_rate_up   (y +  50bp): {p_rate_up_j:.6f}")
+        print(f"effective_duration_full: {duration_j:.6f}")
+        print(f"effective_convexity_full: {convexity_j:.6f}")
 
 
 if __name__ == "__main__":
