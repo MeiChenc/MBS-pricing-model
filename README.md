@@ -1,6 +1,6 @@
-# mbs_logit.py
+# mbs_OLS.py
 
-`mbs_logit.py` restores the Colab workflow into a runnable Python script for:
+`mbs_OLS.py` restores the Colab workflow into a runnable Python script for:
 - OLS `logit(SMM)` prepayment regression
 - Vasicek stochastic rate simulation
 - Path-dependent MBS cash-flow pricing
@@ -48,13 +48,13 @@ Split is done on monthly cohort panel sorted by `period`.
 Run with defaults:
 
 ```bash
-python3 mbs_logit.py
+python3 mbs_OLS.py
 ```
 
 Example with explicit options:
 
 ```bash
-python3 mbs_logit.py \
+python3 mbs_OLS.py \
   --data-path PrepayData.txt \
   --target-type "30yr TBA Eligible" \
   --train-ratio 0.8 \
@@ -66,7 +66,7 @@ python3 mbs_logit.py \
   --min-rows 40 \
   --min-train-rows 30 \
   --min-test-rows 8 \
-  --output-dir outputs
+  --output-dir outputs/ols
 ```
 
 ## CLI arguments
@@ -82,7 +82,7 @@ python3 mbs_logit.py \
 - `--min-rows` (default: `40`)
 - `--min-train-rows` (default: `30`)
 - `--min-test-rows` (default: `8`)
-- `--output-dir` (default: `outputs`)
+- `--output-dir` (default: `outputs/ols`)
 
 ## Outputs
 
@@ -112,7 +112,7 @@ It also prints three tables to terminal:
 Lower thresholds, for example:
 
 ```bash
-python3 mbs_logit.py --min-rows 30 --min-train-rows 20 --min-test-rows 6
+python3 mbs_OLS.py --min-rows 30 --min-train-rows 20 --min-test-rows 6
 ```
 
 ### 2) Environment / package issues
@@ -122,7 +122,7 @@ Install dependencies from `requirements.txt` in a clean virtual environment.
 Start with fewer paths:
 
 ```bash
-python3 mbs_logit.py --n-paths 30
+python3 mbs_OLS.py --n-paths 30
 ```
 
 Then increase to production value (e.g. 300+).
@@ -131,7 +131,7 @@ Then increase to production value (e.g. 300+).
 
 To extend this project, the next objective is to build and compare three prepayment-model families under the same pricing engine:
 
-1. **OLS Logit model** (current baseline in `mbs_logit.py`)
+1. **OLS Logit model** (current baseline in `mbs_OLS.py`)
 2. **Cox-based hazard model**
 3. **Neural Network (NN) prepayment model**
 
