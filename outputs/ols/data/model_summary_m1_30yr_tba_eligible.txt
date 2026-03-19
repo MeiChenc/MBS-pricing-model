@@ -1,38 +1,38 @@
                             OLS Regression Results                            
 ==============================================================================
-Dep. Variable:              logit_smm   R-squared:                       0.371
-Model:                            OLS   Adj. R-squared:                  0.371
-Method:                 Least Squares   F-statistic:                     4520.
+Dep. Variable:              logit_smm   R-squared:                       0.343
+Model:                            OLS   Adj. R-squared:                  0.343
+Method:                 Least Squares   F-statistic:                     2664.
 Date:                Wed, 18 Mar 2026   Prob (F-statistic):               0.00
-Time:                        00:57:13   Log-Likelihood:            -1.1950e+05
-No. Observations:               91891   AIC:                         2.390e+05
-Df Residuals:                   91878   BIC:                         2.391e+05
+Time:                        09:19:58   Log-Likelihood:                -66329.
+No. Observations:               61203   AIC:                         1.327e+05
+Df Residuals:                   61190   BIC:                         1.328e+05
 Df Model:                          12                                         
 Covariance Type:            nonrobust                                         
 ===================================================================================================================================
                                                                       coef    std err          t      P>|t|      [0.025      0.975]
 -----------------------------------------------------------------------------------------------------------------------------------
-Intercept                                                         -10.7087      0.070   -153.930      0.000     -10.845     -10.572
-bs(spread, df=5, degree=3, include_intercept=False)[0]              2.0052      0.115     17.491      0.000       1.780       2.230
-bs(spread, df=5, degree=3, include_intercept=False)[1]              1.1677      0.064     18.358      0.000       1.043       1.292
-bs(spread, df=5, degree=3, include_intercept=False)[2]              5.4831      0.082     66.849      0.000       5.322       5.644
-bs(spread, df=5, degree=3, include_intercept=False)[3]              2.3790      0.097     24.448      0.000       2.188       2.570
-bs(spread, df=5, degree=3, include_intercept=False)[4]              4.8088      0.189     25.406      0.000       4.438       5.180
-loan_age                                                            0.0204      0.002     13.246      0.000       0.017       0.023
-log_UPB_z                                                           0.1342      0.004     35.616      0.000       0.127       0.142
-bs(spread, df=5, degree=3, include_intercept=False)[0]:loan_age    -0.0287      0.002    -13.209      0.000      -0.033      -0.024
-bs(spread, df=5, degree=3, include_intercept=False)[1]:loan_age    -0.0103      0.001     -7.349      0.000      -0.013      -0.008
-bs(spread, df=5, degree=3, include_intercept=False)[2]:loan_age    -0.0327      0.002    -20.121      0.000      -0.036      -0.030
-bs(spread, df=5, degree=3, include_intercept=False)[3]:loan_age    -0.0167      0.002    -10.642      0.000      -0.020      -0.014
-bs(spread, df=5, degree=3, include_intercept=False)[4]:loan_age    -0.0294      0.002    -16.968      0.000      -0.033      -0.026
+Intercept                                                          -8.4133      0.147    -57.101      0.000      -8.702      -8.125
+bs(spread, df=5, degree=3, include_intercept=False)[0]             -2.9040      0.203    -14.307      0.000      -3.302      -2.506
+bs(spread, df=5, degree=3, include_intercept=False)[1]              2.3872      0.132     18.067      0.000       2.128       2.646
+bs(spread, df=5, degree=3, include_intercept=False)[2]              1.3932      0.166      8.380      0.000       1.067       1.719
+bs(spread, df=5, degree=3, include_intercept=False)[3]              2.4475      0.161     15.162      0.000       2.131       2.764
+bs(spread, df=5, degree=3, include_intercept=False)[4]              0.5935      0.233      2.550      0.011       0.137       1.050
+loan_age                                                            0.0027      0.002      1.204      0.229      -0.002       0.007
+log_UPB_z                                                           0.1710      0.004     44.097      0.000       0.163       0.179
+bs(spread, df=5, degree=3, include_intercept=False)[0]:loan_age     0.0302      0.003     10.253      0.000       0.024       0.036
+bs(spread, df=5, degree=3, include_intercept=False)[1]:loan_age    -0.0120      0.002     -5.732      0.000      -0.016      -0.008
+bs(spread, df=5, degree=3, include_intercept=False)[2]:loan_age    -0.0053      0.002     -2.223      0.026      -0.010      -0.001
+bs(spread, df=5, degree=3, include_intercept=False)[3]:loan_age    -0.0111      0.002     -4.992      0.000      -0.015      -0.007
+bs(spread, df=5, degree=3, include_intercept=False)[4]:loan_age    -0.0021      0.002     -0.888      0.374      -0.007       0.003
 ==============================================================================
-Omnibus:                    45761.014   Durbin-Watson:                   1.191
-Prob(Omnibus):                  0.000   Jarque-Bera (JB):           481409.625
-Skew:                          -2.159   Prob(JB):                         0.00
-Kurtosis:                      13.348   Cond. No.                     9.50e+03
+Omnibus:                    18351.135   Durbin-Watson:                   1.227
+Prob(Omnibus):                  0.000   Jarque-Bera (JB):           115566.276
+Skew:                          -1.295   Prob(JB):                         0.00
+Kurtosis:                       9.214   Cond. No.                     1.79e+04
 ==============================================================================
 
 Notes:
 [1] Standard Errors assume that the covariance matrix of the errors is correctly specified.
-[2] The condition number is large, 9.5e+03. This might indicate that there are
+[2] The condition number is large, 1.79e+04. This might indicate that there are
 strong multicollinearity or other numerical problems.

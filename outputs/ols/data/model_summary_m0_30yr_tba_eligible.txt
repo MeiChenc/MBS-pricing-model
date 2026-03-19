@@ -1,33 +1,33 @@
                             OLS Regression Results                            
 ==============================================================================
-Dep. Variable:              logit_smm   R-squared:                       0.347
-Model:                            OLS   Adj. R-squared:                  0.347
-Method:                 Least Squares   F-statistic:                     6978.
+Dep. Variable:              logit_smm   R-squared:                       0.284
+Model:                            OLS   Adj. R-squared:                  0.284
+Method:                 Least Squares   F-statistic:                     3467.
 Date:                Wed, 18 Mar 2026   Prob (F-statistic):               0.00
-Time:                        00:57:13   Log-Likelihood:            -1.2123e+05
-No. Observations:               91891   AIC:                         2.425e+05
-Df Residuals:                   91883   BIC:                         2.425e+05
+Time:                        09:19:58   Log-Likelihood:                -68971.
+No. Observations:               61203   AIC:                         1.380e+05
+Df Residuals:                   61195   BIC:                         1.380e+05
 Df Model:                           7                                         
 Covariance Type:            nonrobust                                         
 ==========================================================================================================================
                                                              coef    std err          t      P>|t|      [0.025      0.975]
 --------------------------------------------------------------------------------------------------------------------------
-Intercept                                                 -9.9436      0.050   -197.482      0.000     -10.042      -9.845
-bs(spread, df=5, degree=3, include_intercept=False)[0]     1.0287      0.080     12.917      0.000       0.873       1.185
-bs(spread, df=5, degree=3, include_intercept=False)[1]     1.4025      0.045     31.459      0.000       1.315       1.490
-bs(spread, df=5, degree=3, include_intercept=False)[2]     3.8948      0.057     68.628      0.000       3.784       4.006
-bs(spread, df=5, degree=3, include_intercept=False)[3]     1.9915      0.054     36.986      0.000       1.886       2.097
-bs(spread, df=5, degree=3, include_intercept=False)[4]     3.1080      0.064     48.637      0.000       2.983       3.233
-loan_age                                                  -0.0025   6.37e-05    -38.908      0.000      -0.003      -0.002
-log_UPB_z                                                  0.1046      0.004     27.947      0.000       0.097       0.112
+Intercept                                                 -8.2150      0.064   -129.284      0.000      -8.340      -8.090
+bs(spread, df=5, degree=3, include_intercept=False)[0]    -1.3199      0.091    -14.493      0.000      -1.498      -1.141
+bs(spread, df=5, degree=3, include_intercept=False)[1]     2.0657      0.058     35.851      0.000       1.953       2.179
+bs(spread, df=5, degree=3, include_intercept=False)[2]     1.0960      0.072     15.204      0.000       0.955       1.237
+bs(spread, df=5, degree=3, include_intercept=False)[3]     1.4691      0.065     22.667      0.000       1.342       1.596
+bs(spread, df=5, degree=3, include_intercept=False)[4]     1.0330      0.075     13.762      0.000       0.886       1.180
+loan_age                                                  -0.0036   6.99e-05    -51.727      0.000      -0.004      -0.003
+log_UPB_z                                                  0.1055      0.004     27.017      0.000       0.098       0.113
 ==============================================================================
-Omnibus:                    42910.955   Durbin-Watson:                   1.148
-Prob(Omnibus):                  0.000   Jarque-Bera (JB):           383463.846
-Skew:                          -2.046   Prob(JB):                         0.00
-Kurtosis:                      12.133   Cond. No.                     5.28e+03
+Omnibus:                    17795.111   Durbin-Watson:                   1.128
+Prob(Omnibus):                  0.000   Jarque-Bera (JB):            96691.842
+Skew:                          -1.297   Prob(JB):                         0.00
+Kurtosis:                       8.585   Cond. No.                     6.51e+03
 ==============================================================================
 
 Notes:
 [1] Standard Errors assume that the covariance matrix of the errors is correctly specified.
-[2] The condition number is large, 5.28e+03. This might indicate that there are
+[2] The condition number is large, 6.51e+03. This might indicate that there are
 strong multicollinearity or other numerical problems.

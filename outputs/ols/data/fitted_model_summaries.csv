@@ -1,7 +1,7 @@
 Type_of_Security,model_name,formula,nobs,rsquared,adj_rsquared,aic,bic
-15yr TBA Eligible,M0,"logit_smm ~ bs(spread, df=5, degree=3, include_intercept=False) + loan_age + log_UPB_z",46150,0.3315946623681628,0.33149326153240755,117474.47779179398,117544.39500971342
-15yr TBA Eligible,M1,"logit_smm ~ bs(spread, df=5, degree=3, include_intercept=False) + loan_age + log_UPB_z + bs(spread, df=5, degree=3, include_intercept=False):loan_age",46150,0.37793089802168767,0.3777691009992601,114168.89568051128,114282.51115963039
-20yr TBA Eligible,M0,"logit_smm ~ bs(spread, df=5, degree=3, include_intercept=False) + loan_age + log_UPB_z",31747,0.39169716506374863,0.39156300457209636,90092.68412057427,90159.6085486676
-20yr TBA Eligible,M1,"logit_smm ~ bs(spread, df=5, degree=3, include_intercept=False) + loan_age + log_UPB_z + bs(spread, df=5, degree=3, include_intercept=False):loan_age",31747,0.4193313549152634,0.4191117789481299,88626.68463245688,88735.43682810855
-30yr TBA Eligible,M0,"logit_smm ~ bs(spread, df=5, degree=3, include_intercept=False) + loan_age + log_UPB_z",91891,0.347077722308779,0.3470279801808136,242471.554310481,242546.9811774491
-30yr TBA Eligible,M1,"logit_smm ~ bs(spread, df=5, degree=3, include_intercept=False) + loan_age + log_UPB_z + bs(spread, df=5, degree=3, include_intercept=False):loan_age",91891,0.37121318057030184,0.37113105599387275,239020.40450732104,239142.97316614422
+15yr TBA Eligible,M0,"logit_smm ~ bs(spread, df=5, degree=3, include_intercept=False) + loan_age + log_UPB_z",30306,0.19961509705999536,0.19943017745076108,65622.68536277926,65689.23817071282
+15yr TBA Eligible,M1,"logit_smm ~ bs(spread, df=5, degree=3, include_intercept=False) + loan_age + log_UPB_z + bs(spread, df=5, degree=3, include_intercept=False):loan_age",30306,0.26207055365800125,0.26177823684038315,63170.48888602201,63278.63719891406
+20yr TBA Eligible,M0,"logit_smm ~ bs(spread, df=5, degree=3, include_intercept=False) + loan_age + log_UPB_z",21573,0.29086960262868133,0.2906394188688112,50437.76887661703,50501.6024591112
+20yr TBA Eligible,M1,"logit_smm ~ bs(spread, df=5, degree=3, include_intercept=False) + loan_age + log_UPB_z + bs(spread, df=5, degree=3, include_intercept=False):loan_age",21573,0.32982653370663817,0.32945352435619657,49228.833041580394,49332.562613133414
+30yr TBA Eligible,M0,"logit_smm ~ bs(spread, df=5, degree=3, include_intercept=False) + loan_age + log_UPB_z",61203,0.28395421917903274,0.28387231182605055,137958.99748549814,138031.1730973934
+30yr TBA Eligible,M1,"logit_smm ~ bs(spread, df=5, degree=3, include_intercept=False) + loan_age + log_UPB_z + bs(spread, df=5, degree=3, include_intercept=False):loan_age",61203,0.34318116634690166,0.34305235729307204,132684.98311050978,132802.26847983958

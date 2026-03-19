@@ -1,0 +1,38 @@
+                            OLS Regression Results                            
+==============================================================================
+Dep. Variable:            cloglog_smm   R-squared:                       0.262
+Model:                            OLS   Adj. R-squared:                  0.262
+Method:                 Least Squares   F-statistic:                     896.4
+Date:                Wed, 18 Mar 2026   Prob (F-statistic):               0.00
+Time:                        09:33:16   Log-Likelihood:                -31565.
+No. Observations:               30306   AIC:                         6.316e+04
+Df Residuals:                   30293   BIC:                         6.326e+04
+Df Model:                          12                                         
+Covariance Type:            nonrobust                                         
+===================================================================================================================================
+                                                                      coef    std err          t      P>|t|      [0.025      0.975]
+-----------------------------------------------------------------------------------------------------------------------------------
+Intercept                                                          -7.8617      0.163    -48.102      0.000      -8.182      -7.541
+bs(spread, df=5, degree=3, include_intercept=False)[0]             -2.0710      0.236     -8.769      0.000      -2.534      -1.608
+bs(spread, df=5, degree=3, include_intercept=False)[1]             -0.2372      0.149     -1.592      0.111      -0.529       0.055
+bs(spread, df=5, degree=3, include_intercept=False)[2]              1.3392      0.182      7.375      0.000       0.983       1.695
+bs(spread, df=5, degree=3, include_intercept=False)[3]              0.9957      0.163      6.110      0.000       0.676       1.315
+bs(spread, df=5, degree=3, include_intercept=False)[4]              1.2569      0.182      6.919      0.000       0.901       1.613
+loan_age                                                           -0.0119      0.003     -4.508      0.000      -0.017      -0.007
+log_UPB_z                                                           0.1018      0.005     21.025      0.000       0.092       0.111
+bs(spread, df=5, degree=3, include_intercept=False)[0]:loan_age     0.0351      0.004      9.235      0.000       0.028       0.043
+bs(spread, df=5, degree=3, include_intercept=False)[1]:loan_age     0.0168      0.002      6.937      0.000       0.012       0.022
+bs(spread, df=5, degree=3, include_intercept=False)[2]:loan_age     0.0012      0.003      0.412      0.681      -0.004       0.007
+bs(spread, df=5, degree=3, include_intercept=False)[3]:loan_age     0.0073      0.003      2.804      0.005       0.002       0.012
+bs(spread, df=5, degree=3, include_intercept=False)[4]:loan_age     0.0074      0.003      2.408      0.016       0.001       0.013
+==============================================================================
+Omnibus:                    12593.760   Durbin-Watson:                   1.392
+Prob(Omnibus):                  0.000   Jarque-Bera (JB):           123279.277
+Skew:                          -1.734   Prob(JB):                         0.00
+Kurtosis:                      12.252   Cond. No.                     8.69e+03
+==============================================================================
+
+Notes:
+[1] Standard Errors assume that the covariance matrix of the errors is correctly specified.
+[2] The condition number is large, 8.69e+03. This might indicate that there are
+strong multicollinearity or other numerical problems.
